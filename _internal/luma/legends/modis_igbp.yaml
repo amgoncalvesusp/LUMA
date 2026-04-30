@@ -1,0 +1,62 @@
+# MODIS MCD12Q1 IGBP Legend
+# Source: https://lpdaac.usgs.gov/products/mcd12q1v061/
+name: "MODIS Land Cover (IGBP)"
+description: "Global land cover at 500m resolution from MODIS (MCD12Q1 v061)"
+resolution: "500m"
+reported_accuracy: "73.6%"
+coverage: "Global"
+temporal_range: "2001-2023"
+
+classes:
+  1:
+    name: "Evergreen Needleleaf Forests"
+    color: "#05450a"
+  2:
+    name: "Evergreen Broadleaf Forests"
+    color: "#086a10"
+  3:
+    name: "Deciduous Needleleaf Forests"
+    color: "#54a708"
+  4:
+    name: "Deciduous Broadleaf Forests"
+    color: "#78d203"
+  5:
+    name: "Mixed Forests"
+    color: "#009900"
+  6:
+    name: "Closed Shrublands"
+    color: "#c6b044"
+  7:
+    name: "Open Shrublands"
+    color: "#dcd159"
+  8:
+    name: "Woody Savannas"
+    color: "#dade48"
+  9:
+    name: "Savannas"
+    color: "#fbff13"
+  10:
+    name: "Grasslands"
+    color: "#b6ff05"
+  11:
+    name: "Permanent Wetlands"
+    color: "#27ff87"
+  12:
+    name: "Croplands"
+    color: "#c24f44"
+  13:
+    name: "Urban and Built-up Lands"
+    color: "#a5a5a5"
+    impervious: true
+  14:
+    name: "Cropland/Natural Vegetation Mosaics"
+    color: "#ff6d4c"
+  15:
+    name: "Permanent Snow and Ice"
+    color: "#69fff8"
+  16:
+    name: "Barren"
+    color: "#f9ffa4"
+  17:
+    name: "Water Bodies"
+    color: "#1c0dff"

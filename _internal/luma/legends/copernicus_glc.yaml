@@ -1,0 +1,80 @@
+# Copernicus Global Land Cover 2019 Legend
+# Source: https://land.copernicus.eu/global/products/lc
+name: "Copernicus Global Land Cover"
+description: "Global land cover at 100m resolution with fractional cover layers"
+resolution: "100m"
+reported_accuracy: "80.6%"
+coverage: "Global"
+temporal_range: "2015-2019"
+
+classes:
+  0:
+    name: "No Data"
+    color: "#282828"
+  20:
+    name: "Shrubs"
+    color: "#ffbb22"
+  30:
+    name: "Herbaceous Vegetation"
+    color: "#ffff4c"
+  40:
+    name: "Cultivated and Managed Vegetation"
+    color: "#f096ff"
+  50:
+    name: "Urban / Built Up"
+    color: "#fa0000"
+    impervious: true
+  60:
+    name: "Bare / Sparse Vegetation"
+    color: "#b4b4b4"
+  70:
+    name: "Snow and Ice"
+    color: "#f0f0f0"
+  80:
+    name: "Permanent Water Bodies"
+    color: "#0032c8"
+  90:
+    name: "Herbaceous Wetland"
+    color: "#0096a0"
+  100:
+    name: "Moss and Lichen"
+    color: "#fae6a0"
+  111:
+    name: "Closed Forest, Evergreen Needle Leaf"
+    color: "#58481f"
+  112:
+    name: "Closed Forest, Evergreen Broad Leaf"
+    color: "#009900"
+  113:
+    name: "Closed Forest, Deciduous Needle Leaf"
+    color: "#70663e"
+  114:
+    name: "Closed Forest, Deciduous Broad Leaf"
+    color: "#00cc00"
+  115:
+    name: "Closed Forest, Mixed"
+    color: "#4e751f"
+  116:
+    name: "Closed Forest, Not Matching Any"
+    color: "#007800"
+  121:
+    name: "Open Forest, Evergreen Needle Leaf"
+    color: "#666000"
+  122:
+    name: "Open Forest, Evergreen Broad Leaf"
+    color: "#8db400"
+  123:
+    name: "Open Forest, Deciduous Needle Leaf"
+    color: "#8d7400"
+  124:
+    name: "Open Forest, Deciduous Broad Leaf"
+    color: "#a0dc00"
+  125:
+    name: "Open Forest, Mixed"
+    color: "#929900"
+  126:
+    name: "Open Forest, Not Matching Any"
+    color: "#648c00"
+  200:
+    name: "Oceans, Seas"
+    color: "#000080"

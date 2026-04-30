@@ -1,0 +1,163 @@
+# MapBiomas Collection 9 — Brazilian Land Use/Land Cover Legend
+# Source: https://mapbiomas.org
+name: "MapBiomas Collection 9"
+description: "Annual land use/cover mapping of Brazil at 30m resolution (Landsat)"
+resolution: "30m"
+reported_accuracy: "89.8%"
+coverage: "Brazil, Amazon biome, Atlantic Forest, Cerrado, Caatinga, Pampa, Pantanal"
+temporal_range: "1985-2023"
+
+classes:
+  1:
+    name: "Forest"
+    name_pt: "Floresta"
+    color: "#1f8d49"
+  3:
+    name: "Forest Formation"
+    name_pt: "Formação Florestal"
+    color: "#1f8d49"
+  4:
+    name: "Savanna Formation"
+    name_pt: "Formação Savânica"
+    color: "#7dc975"
+  5:
+    name: "Mangrove"
+    name_pt: "Mangue"
+    color: "#04381d"
+  6:
+    name: "Floodable Forest"
+    name_pt: "Floresta Alagável"
+    color: "#026975"
+  49:
+    name: "Wooded Sandbank Vegetation"
+    name_pt: "Vegetação Arbórea de Restinga"
+    color: "#02d659"
+  10:
+    name: "Non Forest Natural Formation"
+    name_pt: "Formação não Florestal Natural"
+    color: "#d6bc74"
+  11:
+    name: "Wetland"
+    name_pt: "Campo Alagado e Área Pantanosa"
+    color: "#519799"
+  12:
+    name: "Grassland"
+    name_pt: "Formação Campestre"
+    color: "#d6bc74"
+  32:
+    name: "Salt Flat"
+    name_pt: "Apicum"
+    color: "#fc8114"
+  29:
+    name: "Rocky Outcrop"
+    name_pt: "Afloramento Rochoso"
+    color: "#ffaa5f"
+  50:
+    name: "Herbaceous Sandbank Vegetation"
+    name_pt: "Restinga Herbácea"
+    color: "#ad5100"
+  13:
+    name: "Other Non Forest Formations"
+    name_pt: "Outras Formações não Florestais"
+    color: "#d89f5c"
+  14:
+    name: "Farming"
+    name_pt: "Agropecuária"
+    color: "#FFFFB2"
+  15:
+    name: "Pasture"
+    name_pt: "Pastagem"
+    color: "#edde8e"
+  18:
+    name: "Agriculture"
+    name_pt: "Agricultura"
+    color: "#E974ED"
+  19:
+    name: "Temporary Crop"
+    name_pt: "Lavoura Temporária"
+    color: "#C27BA0"
+  39:
+    name: "Soybean"
+    name_pt: "Soja"
+    color: "#f5b3c8"
+  20:
+    name: "Sugar Cane"
+    name_pt: "Cana-de-açúcar"
+    color: "#db7093"
+  40:
+    name: "Rice"
+    name_pt: "Arroz"
+    color: "#c71585"
+  62:
+    name: "Cotton"
+    name_pt: "Algodão"
+    color: "#ff69b4"
+  41:
+    name: "Other Temporary Crops"
+    name_pt: "Outras Lavouras Temporárias"
+    color: "#f54ca9"
+  36:
+    name: "Perennial Crop"
+    name_pt: "Lavoura Perene"
+    color: "#d082de"
+  46:
+    name: "Coffee"
+    name_pt: "Café"
+    color: "#d68fe2"
+  47:
+    name: "Citrus"
+    name_pt: "Citrus"
+    color: "#9932cc"
+  35:
+    name: "Oil Palm"
+    name_pt: "Dendê"
+    color: "#9065d0"
+  48:
+    name: "Other Perennial Crops"
+    name_pt: "Outras Lavouras Perenes"
+    color: "#e6ccff"
+  9:
+    name: "Forest Plantation"
+    name_pt: "Silvicultura"
+    color: "#7a5900"
+  21:
+    name: "Mosaic of Uses"
+    name_pt: "Mosaico de Usos"
+    color: "#ffefc3"
+  22:
+    name: "Non Vegetated Area"
+    name_pt: "Área não Vegetada"
+    color: "#d4271e"
+  23:
+    name: "Beach, Dune and Sand Spot"
+    name_pt: "Praia, Duna e Areal"
+    color: "#ffa07a"
+  24:
+    name: "Urban Area"
+    name_pt: "Área Urbana"
+    color: "#d4271e"
+    impervious: true
+  30:
+    name: "Mining"
+    name_pt: "Mineração"
+    color: "#9c0027"
+  25:
+    name: "Other Non Vegetated Areas"
+    name_pt: "Outras Áreas não Vegetadas"
+    color: "#db4d4f"
+  26:
+    name: "Water"
+    name_pt: "Água"
+    color: "#0000FF"
+  33:
+    name: "River, Lake and Ocean"
+    name_pt: "Rio, Lago e Oceano"
+    color: "#2532e4"
+  31:
+    name: "Aquaculture"
+    name_pt: "Aquicultura"
+    color: "#091077"
+  27:
+    name: "Non Observed"
+    name_pt: "Não Observado"
+    color: "#ffffff"

@@ -1,0 +1,107 @@
+# LUMA — Data Sources Catalog
+# Each source maps to a legend and an optional URL template for remote access.
+#
+# URL templates can use {year}, {lat}, {lon}, {tile} placeholders.
+# For sources without a public COG URL, the user provides a local file.
+# download_url provides a direct link for users to download the dataset.
+
+sources:
+  esa_worldcover_2021:
+    display_name: "ESA WorldCover 2021"
+    legend: "esa_worldcover"
+    type: "remote_cog"
+    url_template: "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_{lat_tile}{lon_tile}_Map.tif"
+    tile_grid: "esa_worldcover"
+    years: [2021]
+    download_url: "https://esa-worldcover.org/en/data-access"
+    download_instructions: "Free access. Select region and download GeoTIFF tiles."
+
+  esa_worldcover_2020:
+    display_name: "ESA WorldCover 2020"
+    legend: "esa_worldcover"
+    type: "remote_cog"
+    url_template: "https://esa-worldcover.s3.eu-central-1.amazonaws.com/v100/2020/map/ESA_WorldCover_10m_2020_v100_{lat_tile}{lon_tile}_Map.tif"
+    tile_grid: "esa_worldcover"
+    years: [2020]
+    download_url: "https://esa-worldcover.org/en/data-access"
+    download_instructions: "Free access. Select region and download GeoTIFF tiles."
+
+  mapbiomas_brazil_col10:
+    display_name: "MapBiomas Brazil (Collection 10)"
+    legend: "mapbiomas_col10"
+    type: "local"
+    years_range: [1985, 2024]
+    download_url: "https://brasil.mapbiomas.org/en/colecoes-mapbiomas/"
+    download_instructions: "Select 'Coverage' > Choose year > Download GeoTIFF for your state/biome. Free registration required."
+
+  mapbiomas_brazil:
+    display_name: "MapBiomas Brazil (Collection 9)"
+    legend: "mapbiomas_col9"
+    type: "local"
+    years_range: [1985, 2023]
+    download_url: "https://brasil.mapbiomas.org/en/colecoes-mapbiomas/"
+    download_instructions: "Select 'Coverage' > Choose year > Download GeoTIFF for your state/biome. Free registration required."
+
+  mapbiomas_amazon:
+    display_name: "MapBiomas Amazonia"
+    legend: "mapbiomas_col9"
+    type: "local"
+    years_range: [1985, 2023]
+    download_url: "https://amazonia.mapbiomas.org/"
+    download_instructions: "Pan-Amazon land cover. Select collection and year, export as GeoTIFF."
+
+  mapbiomas_atlantic_forest:
+    display_name: "MapBiomas Atlantic Forest"
+    legend: "mapbiomas_col9"
+    type: "local"
+    years_range: [1985, 2023]
+    download_url: "https://bosqueatlantico.mapbiomas.org/"
+    download_instructions: "Atlantic Forest biome land cover. Select collection and year."
+
+  mapbiomas_chaco:
+    display_name: "MapBiomas Chaco"
+    legend: "mapbiomas_col9"
+    type: "local"
+    years_range: [1985, 2023]
+    download_url: "https://chaco.mapbiomas.org/"
+    download_instructions: "Gran Chaco region land cover."
+
+  copernicus_glc:
+    display_name: "Copernicus Global Land Cover"
+    legend: "copernicus_glc"
+    type: "local"
+    years: [2015, 2016, 2017, 2018, 2019]
+    download_url: "https://land.copernicus.eu/en/products/global-dynamic-land-cover/copernicus-global-land-service-land-cover-100m-collection-3-epoch-2019-globe"
+    download_instructions: "Free access with Copernicus account. Download 100m discrete classification GeoTIFF tiles."
+
+  modis_mcd12q1:
+    display_name: "MODIS Land Cover (MCD12Q1)"
+    legend: "modis_igbp"
+    type: "local"
+    years_range: [2001, 2023]
+    download_url: "https://lpdaac.usgs.gov/products/mcd12q1v061/"
+    download_instructions: "Requires NASA Earthdata login (free). Use AppEEARS or Earthdata Search to download HDF5/GeoTIFF tiles."
+
+  dynamic_world:
+    display_name: "Google Dynamic World"
+    legend: "dynamic_world"
+    type: "local"
+    years_range: [2015, 2025]
+    download_url: "https://dynamicworld.app/"
+    download_instructions: "Visualize online. To download GeoTIFF, use Google Earth Engine: ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1'). Requires GEE account."
+
+  global_forest_watch:
+    display_name: "Global Forest Watch (Hansen)"
+    legend: "esa_worldcover"
+    type: "local"
+    years_range: [2000, 2023]
+    download_url: "https://data.globalforestwatch.org/datasets/tree-cover-loss/explore"
+    download_instructions: "Tree cover loss/gain data at 30m. Download tiles as GeoTIFF. Free access."
+
+# Tile grid definitions
+tile_grids:
+  esa_worldcover:
+    step_lat: 3
+    step_lon: 3
+    format_lat: "{hemisphere}{deg:02d}"
+    format_lon: "{hemisphere}{deg:03d}"

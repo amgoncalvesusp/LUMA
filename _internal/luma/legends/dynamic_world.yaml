@@ -1,0 +1,38 @@
+# Google Dynamic World Legend
+# Source: https://dynamicworld.app
+name: "Dynamic World"
+description: "Near real-time global land cover at 10m resolution from Sentinel-2"
+resolution: "10m"
+reported_accuracy: "73.8%"
+coverage: "Global"
+temporal_range: "2015-present"
+
+classes:
+  0:
+    name: "Water"
+    color: "#419bdf"
+  1:
+    name: "Trees"
+    color: "#397d49"
+  2:
+    name: "Grass"
+    color: "#88b053"
+  3:
+    name: "Flooded Vegetation"
+    color: "#7a87c6"
+  4:
+    name: "Crops"
+    color: "#e49635"
+  5:
+    name: "Shrub and Scrub"
+    color: "#dfc35a"
+  6:
+    name: "Built"
+    color: "#c4281b"
+    impervious: true
+  7:
+    name: "Bare"
+    color: "#a59b8f"
+  8:
+    name: "Snow and Ice"
+    color: "#b39fe1"

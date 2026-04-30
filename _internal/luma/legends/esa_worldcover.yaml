@@ -1,0 +1,44 @@
+# ESA WorldCover 2021 Legend
+# Source: https://esa-worldcover.org
+name: "ESA WorldCover 2021"
+description: "Global land cover at 10m resolution from Sentinel-1 and Sentinel-2"
+resolution: "10m"
+reported_accuracy: "74.4%"
+coverage: "Global"
+temporal_range: "2020-2021"
+
+classes:
+  10:
+    name: "Tree Cover"
+    color: "#006400"
+  20:
+    name: "Shrubland"
+    color: "#ffbb22"
+  30:
+    name: "Grassland"
+    color: "#ffff4c"
+  40:
+    name: "Cropland"
+    color: "#f096ff"
+  50:
+    name: "Built-up"
+    color: "#fa0000"
+    impervious: true
+  60:
+    name: "Bare / Sparse Vegetation"
+    color: "#b4b4b4"
+  70:
+    name: "Snow and Ice"
+    color: "#f0f0f0"
+  80:
+    name: "Permanent Water Bodies"
+    color: "#0064c8"
+  90:
+    name: "Herbaceous Wetland"
+    color: "#0096a0"
+  95:
+    name: "Mangroves"
+    color: "#00cf75"
+  100:
+    name: "Moss and Lichen"
+    color: "#fae6a0"
