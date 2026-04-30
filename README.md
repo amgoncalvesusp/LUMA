@@ -158,6 +158,25 @@ If you use LUMA in research, technical reports, or derived workflows, cite the s
 
 `10.5281/zenodo.19928497`
 
+## How to cite
+
+Recommended citation:
+
+Goncalves, A. M., and Gorni, G. R. LUMA: Land Use & Land Cover Analyzer. Zenodo. <https://doi.org/10.5281/zenodo.19928497>
+
+BibTeX:
+
+```bibtex
+@software{goncalves_gorni_luma_2026,
+  author = {Goncalves, Adriano Marques and Gorni, Guilherme Rossi},
+  title = {LUMA: Land Use \& Land Cover Analyzer},
+  year = {2026},
+  publisher = {Zenodo},
+  doi = {10.5281/zenodo.19928497},
+  url = {https://doi.org/10.5281/zenodo.19928497}
+}
+```
+
 ## Authors
 
 - Adriano Marques Goncalves (UNIARA)
