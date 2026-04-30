@@ -1,36 +1,40 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19928497.svg)](https://doi.org/10.5281/zenodo.19928497)
+
 # LUMA
 
-**LUMA** (Land Use & Land Cover Analyzer) é um software para análise de uso e cobertura do solo a partir de rasters geoespaciais. Ele permite calcular a distribuição de classes de cobertura, métricas de paisagem, comparação entre pontos e análise temporal usando arquivos GeoTIFF ou fontes remotas compatíveis.
+**LUMA** (Land Use & Land Cover Analyzer) is a desktop software tool for land use and land cover analysis based on geospatial raster data. It supports local GeoTIFF files and compatible remote datasets, enabling buffer-based analysis from geographic coordinates, class distribution summaries, landscape metrics, multi-point comparison, and temporal change assessment.
 
-Repositório público: <https://github.com/amgoncalvesusp/LUMA>
+Public repository: <https://github.com/amgoncalvesusp/LUMA>
 
-Release atual: <https://github.com/amgoncalvesusp/LUMA/releases/tag/v1.0.0>
+Current release: <https://github.com/amgoncalvesusp/LUMA/releases/tag/v1.0.0>
 
-## Principais recursos
+Zenodo DOI: <https://doi.org/10.5281/zenodo.19928497>
 
-- Análise de uso e cobertura do solo por coordenada central e raio de buffer.
-- Leitura de rasters GeoTIFF locais (`.tif` / `.tiff`).
-- Uso de fontes remotas compatíveis, incluindo ESA WorldCover.
-- Suporte a legendas para MapBiomas, ESA WorldCover, Copernicus Global Land Cover, MODIS e Dynamic World.
-- Cálculo de área por classe, porcentagem, pixels válidos e área total.
-- Métricas de paisagem, incluindo diversidade de Shannon, diversidade de Simpson, fragmentos, densidade de fragmentos, índice do maior fragmento, agregação, contágio, forma média e índice de área impermeável.
-- Análise temporal entre dois anos ou série temporal com múltiplos arquivos.
-- Comparação de múltiplos pontos por entrada manual, colagem de tabela, CSV ou Excel.
-- Exportação de resultados em CSV, Excel, JSON, PDF e TIFF para mapas comparativos.
+## Main features
 
-## Como baixar
+- Land use and land cover analysis using a central coordinate and buffer radius.
+- Support for local GeoTIFF raster files (`.tif` / `.tiff`).
+- Support for compatible remote datasets, including ESA WorldCover.
+- Legend support for MapBiomas, ESA WorldCover, Copernicus Global Land Cover, MODIS, and Dynamic World.
+- Calculation of class area, percentage, valid pixels, and total area.
+- Landscape metrics, including Shannon diversity, Simpson diversity, patch count, patch density, largest patch index, aggregation, contagion, mean shape index, and impervious surface area index.
+- Temporal analysis for two-date comparison or multi-year series.
+- Multi-point comparison using manual input, pasted tables, CSV, or Excel files.
+- Export of results to CSV, Excel, JSON, PDF, and TIFF for comparative maps.
 
-### Opção recomendada: GitHub Release
+## Download
 
-1. Acesse a página da release:
+### Recommended option: GitHub Release
+
+1. Open the release page:
    <https://github.com/amgoncalvesusp/LUMA/releases/tag/v1.0.0>
-2. Baixe o arquivo `LUMA_ULTIMA.rar` em **Assets**.
-3. Extraia o pacote em uma pasta local.
-4. Execute `LUMA.exe`.
+2. Download `LUMA_ULTIMA.rar` from the **Assets** section.
+3. Extract the package to a local folder.
+4. Run `LUMA.exe`.
 
-### Opção para clonar o repositório
+### Repository clone
 
-Este repositório usa **Git LFS** para armazenar arquivos binários grandes, como DLLs e executáveis. Para clonar corretamente:
+This repository uses **Git LFS** to store large binary files such as DLLs and executables. To clone it correctly:
 
 ```powershell
 git lfs install
@@ -39,120 +43,126 @@ cd LUMA
 git lfs pull
 ```
 
-Depois execute:
+Then run:
 
 ```powershell
 .\LUMA.exe
 ```
 
-Evite usar apenas o botão **Code > Download ZIP** do GitHub quando precisar da distribuição executável completa, porque arquivos versionados via Git LFS podem ser baixados como ponteiros em vez dos binários reais.
+Avoid relying only on **Code > Download ZIP** when you need the full executable distribution, because files tracked by Git LFS may be downloaded as pointer files instead of real binaries.
 
-## Requisitos
+## Requirements
 
-- Windows 10 ou superior.
-- Espaço em disco suficiente para a distribuição completa.
-- Conexão com a internet para datasets remotos ou para baixar dados externos.
-- Para clonagem via Git: Git e Git LFS instalados.
+- Windows 10 or later.
+- Enough disk space for the full distribution package.
+- Internet access for remote datasets or external data download.
+- Git and Git LFS installed if you intend to clone the repository.
 
-O pacote já inclui o executável e as bibliotecas necessárias para execução local. Não é necessário instalar Python para usar a versão distribuída.
+The distribution package already includes the executable and the runtime libraries required for local execution. Python installation is not required to use this distributed version.
 
-## Como usar
+## How to use
 
-1. Abra `LUMA.exe`.
-2. Informe a latitude e longitude em graus decimais.
-   - Exemplo: São Paulo pode ser representado como latitude `-23.55` e longitude `-46.63`.
-3. Defina o raio do buffer em metros.
-4. Escolha a fonte de dados:
-   - **Arquivo Local** para selecionar um raster GeoTIFF já baixado.
-   - **Dataset Remoto** para usar uma fonte remota compatível.
-5. Escolha a legenda adequada ou use a detecção automática quando o nome do arquivo permitir.
-6. Clique em **Analisar**.
-7. Consulte os resultados nas abas da interface.
-8. Use o menu **Arquivo** para exportar os resultados.
+1. Open `LUMA.exe`.
+2. Enter latitude and longitude in decimal degrees.
+   Example: Sao Paulo can be represented as latitude `-23.55` and longitude `-46.63`.
+3. Define the buffer radius in meters.
+4. Choose the data source:
+   - **Local File** to use a GeoTIFF raster already stored on your machine.
+   - **Remote Dataset** to use a compatible remote source.
+5. Choose the appropriate legend or use automatic detection when the file name allows it.
+6. Click **Analyze**.
+7. Review the results in the application tabs.
+8. Use the **File** menu to export outputs.
 
-## Entrada de dados
+## Data input
 
-### Arquivos locais
+### Local files
 
-Use arquivos raster GeoTIFF (`.tif` ou `.tiff`) contendo classes de uso e cobertura do solo. O raster deve cobrir a área analisada e estar em um sistema de coordenadas reconhecido.
+Use GeoTIFF raster files (`.tif` or `.tiff`) containing land use and land cover classes. The raster should cover the analysis area and use a recognized coordinate reference system.
 
-Fontes suportadas pela legenda do LUMA incluem:
+Supported legend families include:
 
-- MapBiomas Brasil, Coleções 9 e 10.
-- MapBiomas Amazônia, Mata Atlântica e Chaco.
-- ESA WorldCover 2020 e 2021.
-- Copernicus Global Land Cover.
-- MODIS Land Cover MCD12Q1.
-- Google Dynamic World.
-- Global Forest Watch / Hansen.
+- MapBiomas Brazil, Collections 9 and 10
+- MapBiomas Amazonia, Atlantic Forest, and Chaco
+- ESA WorldCover 2020 and 2021
+- Copernicus Global Land Cover
+- MODIS Land Cover MCD12Q1
+- Google Dynamic World
+- Global Forest Watch / Hansen
 
-### Datasets remotos
+### Remote datasets
 
-Quando uma fonte remota estiver disponível, o LUMA baixa somente a área necessária para o buffer informado. Esse modo requer conexão com a internet.
+When a remote source is available, LUMA downloads only the area required for the selected buffer. This mode requires an internet connection.
 
-## Análises disponíveis
+## Available analyses
 
-### Análise simples
+### Single analysis
 
-Calcula a distribuição das classes dentro do buffer:
+Calculates land cover distribution within the selected buffer:
 
-- área em km² e hectares;
-- porcentagem por classe;
-- número de pixels;
-- métricas de paisagem;
-- avisos de qualidade quando a resolução ou a cobertura dos dados forem insuficientes.
+- area in km2 and hectares;
+- class percentage;
+- number of valid pixels;
+- landscape metrics;
+- quality warnings when resolution or coverage is insufficient.
 
-### Análise temporal
+### Temporal analysis
 
-Permite comparar rasters de anos diferentes:
+Allows comparison of rasters from different years:
 
-- matriz de transição entre classes;
-- persistência;
-- mudança líquida por classe;
-- taxa anual de desmatamento FAO;
-- série temporal com múltiplos anos.
+- transition matrix between classes;
+- persistence;
+- net change by class;
+- FAO annual deforestation rate;
+- multi-year time series.
 
-### Comparação multi-ponto
+### Multi-point comparison
 
-Permite comparar vários locais na mesma análise:
+Allows comparison of multiple locations in the same workflow:
 
-- entrada manual de pontos;
-- colagem de tabela;
-- importação de CSV ou Excel;
-- mapeamento de colunas de nome, latitude, longitude e raio;
-- exportação de mapa comparativo em TIFF.
+- manual point entry;
+- pasted tables;
+- CSV or Excel import;
+- column mapping for name, latitude, longitude, and radius;
+- TIFF export for comparative maps.
 
-## Exportação
+## Export
 
-O LUMA permite exportar os resultados em:
+LUMA can export results to:
 
-- CSV;
-- Excel (`.xlsx`);
-- JSON;
-- PDF;
-- TIFF para mapas comparativos.
+- CSV
+- Excel (`.xlsx`)
+- JSON
+- PDF
+- TIFF for comparative maps
 
-Os arquivos exportados são úteis para relatórios técnicos, documentação de análises, comparação entre áreas e arquivamento dos resultados.
+These outputs support technical reporting, reproducible analysis workflows, comparison between areas, and result archiving.
 
-## Distribuição no GitHub
+## GitHub distribution
 
-O projeto é distribuído publicamente pelo GitHub no repositório:
+The project is publicly distributed through GitHub:
 
 <https://github.com/amgoncalvesusp/LUMA>
 
-A versão `v1.0.0` foi publicada como release em:
+Version `v1.0.0` is available as a GitHub Release:
 
 <https://github.com/amgoncalvesusp/LUMA/releases/tag/v1.0.0>
 
-Como a distribuição contém bibliotecas grandes do pacote Windows, o repositório usa Git LFS. Isso permite versionar arquivos maiores do que o limite normal de blobs do GitHub.
+Because the Windows distribution contains large runtime libraries, the repository uses Git LFS. This allows versioning of files that exceed normal GitHub blob size limits.
 
-Para usuários finais, a recomendação é baixar a versão publicada em **Releases**. Para desenvolvedores ou usuários que precisam clonar o repositório, é necessário usar Git LFS.
+For end users, the recommended path is downloading the packaged release from **Releases**. For developers or users who need to clone the repository, Git LFS is required.
 
-## Autores
+## Citation
 
-- Adriano Marques Gonçalves (UNIARA)
+If you use LUMA in research, technical reports, or derived workflows, cite the software using the Zenodo DOI:
+
+`10.5281/zenodo.19928497`
+
+## Authors
+
+- Adriano Marques Goncalves (UNIARA)
 - Guilherme Rossi Gorni (UNIARA)
 
-## Licença
+## License
 
 Apache License 2.0
