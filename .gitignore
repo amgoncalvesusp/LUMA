@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build and distribution artifacts
+build/
+dist/
+luma_unpacked/
+*.egg-info/
+*.spec.bak
+*.log
+*.zip
+*.7z
+*.rar
+*.exe
+*.msi
+
+# Local generated reports/data
+test_report.pdf
+code_summary.txt
+build_log.txt
+
+# Installer outputs
+packaging/windows/output/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/
+
+# Office docs (out of repo by default)
+*.docx
+
