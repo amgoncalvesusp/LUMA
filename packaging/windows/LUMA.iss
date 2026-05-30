@@ -1,6 +1,6 @@
 #define MyAppName "LUMA"
 #define MyAppPublisher "UNIARA"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.1.0"
 #define MyAppExeName "LUMA.exe"
 #define SourceDir "..\\..\\dist\\LUMA_ULTIMA"
 #define IconFile "..\\..\\luma\\resources\\icons\\brazil_map.ico"
