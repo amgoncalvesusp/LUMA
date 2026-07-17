@@ -105,7 +105,9 @@ a = Analysis(
     ],
     hookspath=[os.path.join(os.getcwd(), "hooks")],
     hooksconfig={},
-    runtime_hooks=[os.path.join(os.getcwd(), "hooks", "pyi_rth_qt_plugins.py")],
+    # PyInstaller's built-in PySide6 runtime hook configures the bundled Qt
+    # search paths. A second PATH-mutating hook can select incompatible DLLs.
+    runtime_hooks=[],
     excludes=[
         "tkinter",
         "matplotlib.backends.backend_tkagg",
@@ -151,45 +153,7 @@ coll = COLLECT(
 )
 
 # ── Post-build: copy Qt platform plugins and DLLs next to the .exe ────────
-import shutil
-
-# Post-build: copy Qt platform plugins and DLLs next to the .exe.
-# This keeps the app portable on machines without PySide6/Qt installed and
-# avoids loading platform plugins from unrelated software in PATH.
-dist_root = globals().get("DISTPATH", "dist")
-dist_dir = os.path.join(dist_root, "LUMA")
-if os.path.isdir(dist_dir):
-    src_plugins = os.path.join(pyside6_dir, "plugins")
-    dst_plugins = os.path.join(dist_dir, "plugins")
-    if os.path.isdir(src_plugins):
-        if os.path.isdir(dst_plugins):
-            shutil.rmtree(dst_plugins)
-        shutil.copytree(src_plugins, dst_plugins)
-        print(f"[POST-BUILD] Copied plugins/ to {dst_plugins}")
-
-    # Qt also checks ./platforms beside the executable; keep that layout too.
-    src_platforms = os.path.join(src_plugins, "platforms")
-    dst_platforms = os.path.join(dist_dir, "platforms")
-    if os.path.isdir(src_platforms):
-        if os.path.isdir(dst_platforms):
-            shutil.rmtree(dst_platforms)
-        shutil.copytree(src_platforms, dst_platforms)
-        print(f"[POST-BUILD] Copied platforms/ to {dst_platforms}")
-
-    for pattern in (
-        "Qt6*.dll", "pyside6*.dll", "shiboken6*.dll", "opengl32sw.dll",
-        "D3DCOMPILER_47.dll", "libEGL.dll", "libGLESv2.dll",
-        "vcruntime*.dll", "msvcp*.dll", "concrt140.dll",
-    ):
-        for src in Path(pyside6_dir).glob(pattern):
-            if src.is_file():
-                shutil.copy2(src, os.path.join(dist_dir, src.name))
-                print(f"[POST-BUILD] Copied {src.name}")
-
-    qt_conf = os.path.join(dist_dir, "qt.conf")
-    with open(qt_conf, "w", encoding="ascii") as f:
-        f.write("[Paths]\n")
-        f.write("Prefix = .\n")
-        f.write("Plugins = plugins\n")
-        f.write("Translations = _internal/PySide6/translations\n")
-    print(f"[POST-BUILD] Wrote {qt_conf}")
+# PyInstaller's Qt hooks place the matching Qt DLLs, Python bindings and
+# plugins under ``_internal/PySide6``. Do not duplicate those DLLs beside the
+# executable: duplicate Qt runtimes can make QtWidgets.pyd load a mismatched
+# MSVC/Qt dependency on clean Windows installations.
