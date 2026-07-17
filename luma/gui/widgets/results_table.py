@@ -12,8 +12,55 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QBrush
 
 from luma.core.stats import AnalysisResult, ClassStats, LandscapeMetrics
-from luma.i18n.translator import t
+from luma.i18n.translator import t, get_language
 from luma.gui.widgets.help_bubble import HelpBubble
+
+
+class SummaryPanel(QGroupBox):
+    """Didactic, deterministic summary of the main analysis result."""
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(t("summary.title"), parent)
+        self._label = QLabel("")
+        self._label.setWordWrap(True)
+        self._label.setTextFormat(Qt.TextFormat.PlainText)
+        self._label.setStyleSheet("font-size: 13px; padding: 4px; line-height: 1.4;")
+        layout = QVBoxLayout(self)
+        layout.addWidget(self._label)
+        self.setVisible(False)
+
+    @staticmethod
+    def _percent(value: float) -> str:
+        text = f"{value:.1f}%"
+        return text.replace(".", ",") if get_language() == "pt_BR" else text
+
+    def update_result(self, result: AnalysisResult) -> None:
+        """Render only values directly supported by the computed result."""
+        if not result.class_stats:
+            self._label.setText(t("summary.no_data"))
+            self.setVisible(True)
+            return
+
+        dominant = result.class_stats[0]
+        impervious_pct = sum(
+            cs.percentage for cs in result.class_stats if cs.impervious
+        )
+        patches = result.landscape_metrics.total_patches
+        self._label.setText("\n".join([
+            t("summary.dominant", name=dominant.class_name,
+              percentage=self._percent(dominant.percentage)),
+            t("summary.impervious_proxy", percentage=self._percent(impervious_pct)),
+            t("summary.patches", n=patches),
+            t("summary.source", source=result.source_name or "—"),
+        ]))
+        self.setVisible(True)
+
+    def clear(self) -> None:
+        self._label.clear()
+        self.setVisible(False)
+
+    def refresh_texts(self) -> None:
+        self.setTitle(t("summary.title"))
 
 
 class ResultsTable(QGroupBox):
@@ -25,7 +72,8 @@ class ResultsTable(QGroupBox):
 
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
-        self._info_label = QLabel("")
+        self._info_label = QLabel(t("results.empty"))
+        self._info_label.setWordWrap(True)
         self._info_label.setStyleSheet("font-size: 12px; color: #555;")
         layout.addWidget(self._info_label)
 
@@ -43,25 +91,6 @@ class ResultsTable(QGroupBox):
         self._table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self._table.verticalHeader().setVisible(False)
         layout.addWidget(self._table)
-
-        self._legend_caption = QLabel(self._build_legend_text())
-        self._legend_caption.setWordWrap(True)
-        self._legend_caption.setStyleSheet(
-            "color: #555; font-size: 11px; padding: 6px 2px; "
-            "border-top: 1px solid #eee; margin-top: 4px;"
-        )
-        layout.addWidget(self._legend_caption)
-
-    def _build_legend_text(self) -> str:
-        return (
-            f"<b>{t('legend_table.caption')}.</b> "
-            f"{t('legend_table.desc_pixels')} "
-            f"{t('legend_table.desc_area_km2')} "
-            f"{t('legend_table.desc_area_ha')} "
-            f"{t('legend_table.desc_percentage')} "
-            f"{t('legend_table.desc_num_patches')} "
-            f"{t('legend_table.desc_largest_patch')}"
-        )
 
     def update_results(self, result: AnalysisResult) -> None:
         """Populate the table with analysis results."""
@@ -98,17 +127,42 @@ class ResultsTable(QGroupBox):
         self._table.resizeColumnsToContents()
         self._table.setColumnWidth(0, 24)
 
+    def update_aoi_comparison(self, results: list[dict]) -> None:
+        """Render compact results for several polygonal areas."""
+        headers = [
+            t("aoi_compare.area"), t("aoi_compare.dominant"),
+            t("results.percentage"), t("aoi_compare.area_km2"),
+            t("aoi_compare.patches"),
+        ]
+        self._table.setColumnCount(len(headers))
+        self._table.setHorizontalHeaderLabels(headers)
+        self._table.setRowCount(len(results))
+        for row, result in enumerate(results):
+            stats = result.get("class_stats", [])
+            dominant = max(stats, key=lambda item: item.percentage, default=None)
+            values = [
+                str(result.get("point_label", "")),
+                dominant.class_name if dominant else "—",
+                f"{dominant.percentage:.1f}%" if dominant else "—",
+                f"{result.get('geometry_area_m2', 0.0) / 1e6:.4f}",
+                str(result.get("landscape_metrics").total_patches if result.get("landscape_metrics") else 0),
+            ]
+            for col, value in enumerate(values):
+                self._table.setItem(row, col, QTableWidgetItem(value))
+        self._table.resizeColumnsToContents()
+
     def clear(self) -> None:
         self._table.setRowCount(0)
-        self._info_label.setText("")
+        self._info_label.setText(t("results.empty"))
 
     def refresh_texts(self) -> None:
         self.setTitle(t("results.title"))
+        if self._table.rowCount() == 0:
+            self._info_label.setText(t("results.empty"))
         self._table.setHorizontalHeaderLabels([
             "", t("results.category"), t("results.pixels"),
             t("results.area_km2"), t("results.area_ha"), t("results.percentage"),
         ])
-        self._legend_caption.setText(self._build_legend_text())
 
 
 class MetricsPanel(QGroupBox):
@@ -142,15 +196,12 @@ class MetricsPanel(QGroupBox):
 
     def _setup_ui(self) -> None:
         grid = QGridLayout(self)
-        grid.setHorizontalSpacing(6)
-        grid.setVerticalSpacing(2)
-        grid.setContentsMargins(6, 4, 6, 4)
         for row, (key, label_key, tip_key) in enumerate(self.METRICS_DEFS):
             lbl = QLabel(t(label_key) + ":")
-            lbl.setStyleSheet("font-weight: bold; font-size: 10px;")
+            lbl.setStyleSheet("font-weight: bold; font-size: 12px;")
             val = QLabel("—")
-            val.setStyleSheet("font-size: 10px;")
-            val.setMinimumWidth(70)
+            val.setStyleSheet("font-size: 12px;")
+            val.setMinimumWidth(90)
             bubble = HelpBubble(t(tip_key))
             self._labels[key] = val
             self._name_labels[key] = lbl
@@ -181,14 +232,14 @@ class MetricsPanel(QGroupBox):
         sp_lbl = self._labels["smallest_patch_area"]
         sp_lbl.setText(f"{sp_ha:,.4f}")
         if pixel_area_m2 > 0 and m.smallest_patch_area_m2 <= pixel_area_m2 * 1.05:
-            sp_lbl.setStyleSheet("color: #e67e22; font-weight: bold; font-size: 10px;")
+            sp_lbl.setStyleSheet("color: #e67e22; font-weight: bold; font-size: 12px;")
             pixel_side = math.sqrt(pixel_area_m2)
             self._help_bubbles["smallest_patch_area"].set_tip(
                 t("tips.smallest_patch_area") + "\n\n" +
                 t("tips.smallest_patch_pixel_bias", pixel_m=pixel_side)
             )
         else:
-            sp_lbl.setStyleSheet("font-size: 10px;")
+            sp_lbl.setStyleSheet("font-size: 12px;")
             self._help_bubbles["smallest_patch_area"].set_tip(t("tips.smallest_patch_area"))
 
         # ISA index with Walsh classification

@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 .pytest_cache/
+.coverage
 .mypy_cache/
 .ruff_cache/
 
@@ -14,8 +15,6 @@ env/
 # Build and distribution artifacts
 build/
 dist/
-luma_unpacked/
-*.egg-info/
 *.spec.bak
 *.log
 *.zip
@@ -32,13 +31,13 @@ build_log.txt
 # Installer outputs
 packaging/windows/output/
 
+# Local UI review artifacts and extracted document files
+.ui-review/
+luma_unpacked/
+.claude/
+
 # OS/editor
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
-.claude/
-
-# Office docs (out of repo by default)
-*.docx
-

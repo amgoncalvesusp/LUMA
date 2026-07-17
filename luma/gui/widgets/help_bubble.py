@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QPoint, QEvent
 from PySide6.QtGui import QGuiApplication
 
+from luma.i18n.translator import t
+
 
 def _as_html(text: str) -> str:
     """Wrap plain text in minimal HTML so Qt renders it with word wrap."""
@@ -81,23 +83,23 @@ class HelpBubble(QPushButton):
     def __init__(self, tooltip_text: str, parent: QWidget | None = None):
         super().__init__("i", parent)
         self._tip_text = tooltip_text
-        self.setFixedSize(22, 22)
+        self.setFixedSize(32, 32)
         # Short tooltip hint for hover; full content shown on click
         self.setToolTip(self._short_preview(tooltip_text))
         self.setCursor(Qt.CursorShape.WhatsThisCursor)
         # Override global QPushButton padding/min-height so the glyph stays centered
         self.setStyleSheet("""
             QPushButton {
-                background-color: #3498db;
+                background-color: #176ca6;
                 color: white;
                 border: none;
-                border-radius: 11px;
+                border-radius: 16px;
                 padding: 0px;
                 margin: 0px;
-                min-width: 22px;
-                min-height: 22px;
-                max-width: 22px;
-                max-height: 22px;
+                min-width: 32px;
+                min-height: 32px;
+                max-width: 32px;
+                max-height: 32px;
                 font-family: "Segoe UI", "Arial", sans-serif;
                 font-size: 13px;
                 font-weight: bold;
@@ -106,7 +108,7 @@ class HelpBubble(QPushButton):
                 text-align: center;
             }
             QPushButton:hover {
-                background-color: #2980b9;
+                background-color: #125781;
             }
         """)
         self.clicked.connect(self._show_tip)
@@ -118,7 +120,7 @@ class HelpBubble(QPushButton):
         first = next((ln.strip() for ln in text.splitlines() if ln.strip()), text.strip())
         if len(first) > 120:
             first = first[:117] + "…"
-        return first + "\n(clique para ver mais)"
+        return first + "\n" + t("common.click_for_more")
 
     def _show_tip(self) -> None:
         if self._popup is not None:

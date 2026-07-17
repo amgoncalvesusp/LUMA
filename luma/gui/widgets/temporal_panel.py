@@ -8,17 +8,10 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QFileDialog, QSpinBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QTextEdit, QRadioButton, QButtonGroup, QStackedWidget,
-    QFrame, QScrollArea, QComboBox, QCheckBox, QSizePolicy,
+    QFrame, QScrollArea,
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QSize
 from PySide6.QtGui import QColor, QBrush
-
-try:
-    from matplotlib.figure import Figure
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _FigCanvas
-    _MPL_OK = True
-except Exception:
-    _MPL_OK = False
 
 from luma.i18n.translator import t
 from luma.gui.widgets.help_bubble import HelpBubble
@@ -91,6 +84,10 @@ class TemporalPanel(QGroupBox):
 
     analyze_requested = Signal(str, str, int, int)   # file1, file2, year1, year2
     analyze_multi_requested = Signal(list)             # list[(year, file), ...]
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API
+        """Allow the inputs to fit without horizontal scrolling on notebooks."""
+        return QSize(520, 420)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(t("temporal.title"), parent)
@@ -226,182 +223,9 @@ class TemporalPanel(QGroupBox):
         self._summary.setStyleSheet("font-size: 12px;")
         layout.addWidget(self._summary)
 
-        # ── Chart type selector + chart canvas ─────────────────────────────
-        chart_row = QHBoxLayout()
-        self._lbl_chart_type = QLabel(t("ui.chart_type") + ":")
-        self._cmb_chart_type = QComboBox()
-        self._cmb_chart_type.addItem(t("ui.chart_bar"), "bar")
-        self._cmb_chart_type.addItem(t("ui.chart_line"), "line")
-        self._cmb_chart_type.currentIndexChanged.connect(self._redraw_chart)
-        self._chk_show_maps = QCheckBox(t("ui.show_maps"))
-        self._chk_show_maps.setChecked(True)
-        self._chk_show_maps.toggled.connect(self._on_toggle_maps)
-        chart_row.addWidget(self._lbl_chart_type)
-        chart_row.addWidget(self._cmb_chart_type)
-        chart_row.addSpacing(20)
-        chart_row.addWidget(self._chk_show_maps)
-        chart_row.addStretch()
-        layout.addLayout(chart_row)
-
-        self._chart_canvas = None
-        if _MPL_OK:
-            self._chart_fig = Figure(figsize=(5, 2.5), tight_layout=True)
-            self._chart_canvas = _FigCanvas(self._chart_fig)
-            self._chart_canvas.setMinimumHeight(180)
-            self._chart_canvas.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred,
-            )
-            layout.addWidget(self._chart_canvas)
-
-        # Maps grid container (lazy-built when series rendered)
-        self._maps_container = QWidget()
-        self._maps_layout = QVBoxLayout(self._maps_container)
-        self._maps_layout.setContentsMargins(0, 0, 0, 0)
-        self._maps_cap_label = QLabel("")
-        self._maps_cap_label.setStyleSheet("color:#b9770e;font-size:11px;")
-        self._maps_cap_label.setVisible(False)
-        self._maps_layout.addWidget(self._maps_cap_label)
-        self._maps_web = None  # QWebEngineView lazy
-        layout.addWidget(self._maps_container)
-
         # Add two default year rows for series mode
         self._add_year_row()
         self._add_year_row()
-
-        self._last_series: list[dict] | None = None
-        self._buffer_centre: tuple[float, float, float] | None = None  # lat,lon,r
-
-    def set_buffer_centre(self, lat: float, lon: float, radius_m: float) -> None:
-        self._buffer_centre = (lat, lon, radius_m)
-
-    def _redraw_chart(self) -> None:
-        if not _MPL_OK or self._chart_canvas is None or not self._last_series:
-            return
-        kind = self._cmb_chart_type.currentData() or "bar"
-        series = self._last_series
-        years = [e["year"] for e in series]
-        all_classes: list[str] = []
-        seen: set[str] = set()
-        for entry in series:
-            for cs in entry["class_stats"]:
-                if cs.class_name not in seen:
-                    all_classes.append(cs.class_name)
-                    seen.add(cs.class_name)
-        self._chart_fig.clear()
-        ax = self._chart_fig.add_subplot(111)
-        if kind == "line":
-            for cls_name in all_classes:
-                ys = []
-                for entry in series:
-                    pct = next(
-                        (cs.percentage for cs in entry["class_stats"]
-                         if cs.class_name == cls_name), 0.0,
-                    )
-                    ys.append(pct)
-                ax.plot(years, ys, marker="o", label=cls_name)
-        else:
-            import numpy as _np
-            n_cls = max(len(all_classes), 1)
-            width = 0.8 / n_cls
-            x = _np.arange(len(years))
-            for i, cls_name in enumerate(all_classes):
-                ys = []
-                for entry in series:
-                    pct = next(
-                        (cs.percentage for cs in entry["class_stats"]
-                         if cs.class_name == cls_name), 0.0,
-                    )
-                    ys.append(pct)
-                ax.bar(x + i * width - 0.4 + width / 2, ys, width, label=cls_name)
-            ax.set_xticks(x)
-            ax.set_xticklabels([str(y) for y in years])
-        ax.set_ylabel("%")
-        ax.set_title("")
-        ax.legend(fontsize=7, loc="best", ncol=2)
-        self._chart_canvas.draw_idle()
-
-    def _on_toggle_maps(self, checked: bool) -> None:
-        self._chk_show_maps.setText(
-            t("ui.hide_maps") if checked else t("ui.show_maps")
-        )
-        self._maps_container.setVisible(checked)
-        if checked and self._last_series:
-            self._render_maps_grid()
-
-    def _ensure_maps_web(self) -> bool:
-        if self._maps_web is not None:
-            return True
-        try:
-            from PySide6.QtWebEngineWidgets import QWebEngineView
-            self._maps_web = QWebEngineView()
-            self._maps_web.setMinimumHeight(360)
-            self._maps_layout.addWidget(self._maps_web)
-            return True
-        except Exception:
-            return False
-
-    def _render_maps_grid(self) -> None:
-        if not self._last_series or not self._buffer_centre:
-            return
-        if not self._ensure_maps_web():
-            return
-        series = sorted(self._last_series, key=lambda e: e["year"])
-        capped = False
-        if len(series) > 10:
-            series = [series[0], series[-1]]
-            capped = True
-        self._maps_cap_label.setText(t("ui.map_cap_note"))
-        self._maps_cap_label.setVisible(capped)
-
-        lat, lon, radius_m = self._buffer_centre
-        cells = ""
-        cols = 2 if len(series) > 1 else 1
-        for entry in series:
-            year = entry["year"]
-            cells += f"""
-            <div style="border:1px solid #ccc;padding:4px;background:#fff;">
-              <div style="font-weight:bold;font-size:12px;text-align:center;
-                    padding:2px;background:#34495e;color:#fff;">{year}</div>
-              <div id="m{year}" style="height:260px;"></div>
-            </div>
-            """
-        scripts = ""
-        for entry in series:
-            year = entry["year"]
-            scripts += f"""
-            (function() {{
-              var m = L.map('m{year}', {{zoomControl:false, attributionControl:false}})
-                       .setView([{lat}, {lon}], {self._estimate_zoom(radius_m)});
-              L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png',
-                          {{maxZoom:19}}).addTo(m);
-              L.circle([{lat}, {lon}], {{radius:{radius_m}, color:'#e74c3c',
-                       weight:2, fillOpacity:0.12}}).addTo(m);
-            }})();
-            """
-        html = f"""
-        <!DOCTYPE html><html><head>
-          <meta charset="utf-8"/>
-          <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-          <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-          <style>body{{margin:0;font-family:sans-serif;}}</style>
-        </head><body>
-          <div style="display:grid;grid-template-columns:repeat({cols},1fr);gap:6px;padding:4px;">
-            {cells}
-          </div>
-          <script>{scripts}</script>
-        </body></html>
-        """
-        from PySide6.QtCore import QUrl
-        self._maps_web.setHtml(html, QUrl("https://unpkg.com/"))
-
-    def _estimate_zoom(self, radius_m: float) -> int:
-        if radius_m > 100_000: return 6
-        if radius_m > 50_000: return 7
-        if radius_m > 20_000: return 9
-        if radius_m > 10_000: return 10
-        if radius_m > 5_000: return 11
-        if radius_m > 1_000: return 13
-        return 14
 
     # ── Mode handling ──────────────────────────────────────────────────────
 
@@ -427,7 +251,8 @@ class TemporalPanel(QGroupBox):
                 self._lbl_f2.setText(name)
 
     def _on_analyze_transition(self) -> None:
-        if self._file_t1 and self._file_t2:
+        # Empty paths are resolved from a selected remote catalog source.
+        if (self._file_t1 and self._file_t2) or (not self._file_t1 and not self._file_t2):
             self.analyze_requested.emit(
                 self._file_t1, self._file_t2,
                 self._spin_y1.value(), self._spin_y2.value(),
@@ -450,7 +275,9 @@ class TemporalPanel(QGroupBox):
         self._year_rows.remove(row)
 
     def _on_analyze_series(self) -> None:
-        pairs = [(yr, fp) for yr, fp in (r.get_year_file() for r in self._year_rows) if fp]
+        values = [r.get_year_file() for r in self._year_rows]
+        pairs = ([(yr, "") for yr, _ in values] if not any(fp for _, fp in values)
+                 else [(yr, fp) for yr, fp in values if fp])
         if len(pairs) < 2:
             from PySide6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Error", t("temporal.series_need_two"))
@@ -550,7 +377,6 @@ class TemporalPanel(QGroupBox):
         """
         if not series_data:
             return
-        self._last_series = series_data
 
         # Collect all class names (preserve order of first appearance)
         all_classes: list[str] = []
@@ -629,10 +455,6 @@ class TemporalPanel(QGroupBox):
             lines.append(f"  {cls_name}: {p0:.1f}% → {p1:.1f}%  ({sign}{delta:.1f} p.p.)")
         self._summary.setPlainText("\n".join(lines))
 
-        self._redraw_chart()
-        if self._chk_show_maps.isChecked():
-            self._render_maps_grid()
-
     # ── i18n refresh ───────────────────────────────────────────────────────
 
     def refresh_texts(self) -> None:
@@ -647,12 +469,5 @@ class TemporalPanel(QGroupBox):
         self._tip_transition.set_tip(t("tips.transition_matrix"))
         self._btn_add_year.setText(t("temporal.add_year"))
         self._btn_analyze_series.setText(t("temporal.analyze_series"))
-        self._lbl_chart_type.setText(t("ui.chart_type") + ":")
-        self._cmb_chart_type.setItemText(0, t("ui.chart_bar"))
-        self._cmb_chart_type.setItemText(1, t("ui.chart_line"))
-        self._chk_show_maps.setText(
-            t("ui.hide_maps") if self._chk_show_maps.isChecked() else t("ui.show_maps")
-        )
-        self._maps_cap_label.setText(t("ui.map_cap_note"))
         for row in self._year_rows:
             row.refresh_texts()

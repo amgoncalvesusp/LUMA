@@ -5,7 +5,7 @@ Authors:
     Guilherme Rossi Gorni (UNIARA)
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __authors__ = [
     "Adriano Marques Gonçalves",
     "Guilherme Rossi Gorni",

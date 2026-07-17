@@ -4,6 +4,19 @@ All notable changes to LUMA are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-07-16
+
+### Added
+- Responsive compact mode for notebook-sized and high-DPI screens.
+- Explicit navigation between the input panel and results on compact layouts.
+- Contextual empty-state guidance for results and larger accessible help controls.
+
+### Changed
+- Reorganized analysis, temporal, point-comparison and polygon-comparison layouts.
+- Kept the primary analysis action visible in standard layouts.
+- Synchronized research objectives with the corresponding analysis tabs.
+- Completed Portuguese/English refresh for polygon drawing and comparison results.
+
 ## [1.1.0] - 2026-05-28
 
 ### Added

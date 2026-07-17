@@ -15,13 +15,6 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
 
-try:
-    from matplotlib.figure import Figure as _MplFigure
-    from matplotlib.backends.backend_agg import FigureCanvasAgg as _MplCanvas
-    _MPL_OK = True
-except Exception:
-    _MPL_OK = False
-
 import luma
 from luma.core.stats import AnalysisResult
 from luma.i18n.translator import t, set_language, get_language
@@ -160,8 +153,6 @@ def _build_pdf(
         elements.append(PageBreak())
         _add_temporal_series(elements, styles, temporal_series,
                              content_width=pw_l - 2 * margin)
-        _add_series_chart(elements, styles, temporal_series,
-                          content_width=pw_l - 2 * margin)
 
     # ── Compare points (landscape — many columns) ──
     if compare_data:
@@ -169,8 +160,6 @@ def _build_pdf(
         elements.append(PageBreak())
         _add_compare_analysis(elements, styles, compare_data,
                               content_width=pw_l - 2 * margin)
-        _add_compare_gradient_chart(elements, styles, compare_data,
-                                    content_width=pw_l - 2 * margin)
 
     # ── Compare map image ──
     if compare_map_img:
@@ -215,9 +204,25 @@ def _add_parameters(elements: list, styles, result, params: dict) -> None:
         [t("report.buffer_radius"), f"{radius:,.0f} m"],
         [t("report.buffer_area"), f"{area_km2:.2f} km²"],
     ]
+    aoi = params.get("aoi")
+    if aoi is not None:
+        data.append([t("report.geometry"), t("report.polygon")])
+        data.append([
+            t("report.geometry_area"),
+            f"{getattr(aoi, 'area_m2', 0.0) / 1e6:.4f} km²",
+        ])
+    for key, label_key in (
+        ("source_collection", "report.collection"),
+        ("source_year", "report.year"),
+        ("source_resolution", "report.resolution"),
+    ):
+        if params.get(key) is not None:
+            data.append([t(label_key), str(params[key])])
     if result:
         data.append([t("report.data_source"), result.source_name])
         data.append([t("report.accuracy"), result.source_accuracy])
+        if result.provenance.get("crs"):
+            data.append([t("report.crs"), str(result.provenance["crs"])])
 
     tbl = Table(data, colWidths=[5.5 * cm, 10 * cm])
     tbl.setStyle(TableStyle([
@@ -455,7 +460,8 @@ def _add_compare_analysis(
 
     # Class distribution table — rows = points, cols = classes
     elements.append(Paragraph(t("report.compare_class_pct"), styles["SubSection"]))
-    cls_first_col = 4 * cm
+    has_geometry_area = any("geometry_area_m2" in item for item in compare_data)
+    cls_first_col = 5.5 * cm if has_geometry_area else 4 * cm
     cls_col_w = max(1.2 * cm, (content_width - cls_first_col) / max(len(all_classes), 1))
     cls_col_widths = [cls_first_col] + [cls_col_w] * len(all_classes)
     total_cls = sum(cls_col_widths)
@@ -463,10 +469,15 @@ def _add_compare_analysis(
         factor = content_width / total_cls
         cls_col_widths = [w * factor for w in cls_col_widths]
 
-    header = [t("results.category")] + all_classes
+    header = [t("results.category")]
+    if has_geometry_area:
+        header.append(t("report.compare_area"))
+    header.extend(all_classes)
     table_data = [header]
     for r in compare_data:
         row = [r["point_label"]]
+        if has_geometry_area:
+            row.append(f"{r.get('geometry_area_m2', 0.0) / 1e6:.4f}")
         for cls_name in all_classes:
             pct = 0.0
             for cs in r["class_stats"]:
@@ -541,69 +552,6 @@ def _add_compare_analysis(
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, _ROW_ALT]),
     ]))
     elements.append(tbl)
-
-
-def _render_mpl_image(fig, max_w_cm: float = 16):
-    """Render a matplotlib Figure to a reportlab Image flowable."""
-    from io import BytesIO
-    from reportlab.platypus import Image as RLImage
-    canvas = _MplCanvas(fig)
-    buf = BytesIO()
-    canvas.print_png(buf)
-    buf.seek(0)
-    img = RLImage(buf)
-    iw, ih = img.imageWidth, img.imageHeight
-    if iw and ih:
-        scale = (max_w_cm * cm) / iw
-        img.drawWidth = iw * scale
-        img.drawHeight = ih * scale
-    return img
-
-
-def _add_compare_gradient_chart(elements, styles, compare_data, content_width):
-    if not _MPL_OK or not compare_data:
-        return
-    labels = [r["point_label"] for r in compare_data]
-    values = [r["landscape_metrics"].isa_index for r in compare_data]
-    fig = _MplFigure(figsize=(6, 2.5), tight_layout=True)
-    ax = fig.add_subplot(111)
-    if values:
-        vmin, vmax = min(values), max(values)
-        span = (vmax - vmin) or 1.0
-        cols = [(1 - (v - vmin)/span, 0.4, (v - vmin)/span) for v in values]
-        ax.bar(range(len(labels)), values, color=cols, edgecolor="#222")
-        ax.plot(range(len(labels)), values, color="#222", marker="o", linewidth=1)
-    ax.set_xticks(range(len(labels)))
-    ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
-    ax.set_ylabel("ISA (%)")
-    ax.set_title("Gradient between points — ISA")
-    elements.append(Spacer(1, 4 * mm))
-    elements.append(_render_mpl_image(fig, max_w_cm=content_width / cm))
-
-
-def _add_series_chart(elements, styles, temporal_series, content_width):
-    if not _MPL_OK or not temporal_series:
-        return
-    years = [e["year"] for e in temporal_series]
-    all_classes: list[str] = []
-    seen = set()
-    for entry in temporal_series:
-        for cs in entry["class_stats"]:
-            if cs.class_name not in seen:
-                all_classes.append(cs.class_name)
-                seen.add(cs.class_name)
-    fig = _MplFigure(figsize=(6, 2.8), tight_layout=True)
-    ax = fig.add_subplot(111)
-    for cls in all_classes:
-        ys = [
-            next((cs.percentage for cs in e["class_stats"] if cs.class_name == cls), 0.0)
-            for e in temporal_series
-        ]
-        ax.plot(years, ys, marker="o", label=cls)
-    ax.set_ylabel("%")
-    ax.legend(fontsize=6, loc="best", ncol=2)
-    elements.append(Spacer(1, 4 * mm))
-    elements.append(_render_mpl_image(fig, max_w_cm=content_width / cm))
 
 
 def _add_temporal_series(

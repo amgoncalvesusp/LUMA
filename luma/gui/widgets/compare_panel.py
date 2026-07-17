@@ -9,23 +9,17 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import os
 from dataclasses import dataclass
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QSize
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
     QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
     QComboBox, QLineEdit, QPlainTextEdit, QStackedWidget, QRadioButton,
     QButtonGroup, QCheckBox, QMessageBox, QFrame, QSizePolicy,
 )
-
-try:
-    from matplotlib.figure import Figure
-    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _FigCanvas
-    _MPL_OK = True
-except Exception:
-    _MPL_OK = False
 
 from luma.i18n.translator import t
 from luma.gui.widgets.coord_input import LatitudeInput, LongitudeInput, RadiusInput
@@ -51,7 +45,7 @@ class PointRow(QWidget):
     def __init__(self, index: int, parent: QWidget | None = None):
         super().__init__(parent)
         self.index = index
-        layout = QHBoxLayout(self)
+        layout = QGridLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)
 
@@ -68,20 +62,25 @@ class PointRow(QWidget):
         self.lbl_lon = QLabel("Lon:")
         self.lbl_r = QLabel("R:")
 
-        layout.addWidget(self.lbl_name)
-        layout.addWidget(self.name_input)
-        layout.addWidget(self.lbl_lat)
-        layout.addWidget(self.lat_input)
-        layout.addWidget(self.lbl_lon)
-        layout.addWidget(self.lon_input)
-        layout.addWidget(self.lbl_r)
-        layout.addWidget(self.radius_input)
+        layout.addWidget(self.lbl_name, 0, 0)
+        layout.addWidget(self.name_input, 0, 1, 1, 4)
+        layout.addWidget(self.lbl_lat, 1, 0)
+        layout.addWidget(self.lat_input, 1, 1)
+        layout.addWidget(self.lbl_lon, 1, 2)
+        layout.addWidget(self.lon_input, 1, 3)
+        layout.addWidget(self.lbl_r, 1, 4)
+        layout.addWidget(self.radius_input, 1, 5)
+        layout.setColumnStretch(1, 1)
+        layout.setColumnStretch(3, 1)
+        layout.setColumnStretch(5, 1)
 
-        btn_remove = QPushButton("✕")
-        btn_remove.setFixedSize(24, 24)
-        btn_remove.setStyleSheet("color: #c0392b; font-weight: bold;")
-        btn_remove.clicked.connect(lambda: self.removed.emit(self))
-        layout.addWidget(btn_remove)
+        self.btn_remove = QPushButton("✕")
+        self.btn_remove.setFixedSize(32, 32)
+        self.btn_remove.setAccessibleName(t("input.remove_point"))
+        self.btn_remove.setToolTip(t("input.remove_point"))
+        self.btn_remove.setStyleSheet("color: #a93226; font-weight: bold;")
+        self.btn_remove.clicked.connect(lambda: self.removed.emit(self))
+        layout.addWidget(self.btn_remove, 0, 5, alignment=Qt.AlignmentFlag.AlignRight)
 
     def get_point(self) -> ComparePoint:
         name = self.name_input.text().strip() or t("compare.auto_name", n=self.index + 1)
@@ -95,6 +94,8 @@ class PointRow(QWidget):
     def refresh_texts(self) -> None:
         self.lbl_name.setText(t("compare.col_name") + ":")
         self.name_input.setPlaceholderText(t("compare.auto_name", n=self.index + 1))
+        self.btn_remove.setAccessibleName(t("input.remove_point"))
+        self.btn_remove.setToolTip(t("input.remove_point"))
 
 
 # ── Table-based input (paste / excel share this) ─────────────────────────────
@@ -205,15 +206,19 @@ class _TableInput(QWidget):
                 lat = _to_float(row[idx_lat])
                 lon = _to_float(row[idx_lon])
             except (ValueError, IndexError):
-                continue  # skip malformed rows silently
+                raise ValueError(f"Linha {i + 1}: latitude/longitude inválidas.")
+            if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                raise ValueError(f"Linha {i + 1}: latitude/longitude fora dos limites.")
 
             if idx_radius is not None and idx_radius >= 0:
                 try:
                     r_val = _to_float(row[idx_radius])
                 except (ValueError, IndexError):
-                    r_val = fallback_radius
+                    raise ValueError(f"Linha {i + 1}: raio inválido.")
             else:
                 r_val = fallback_radius
+            if not math.isfinite(r_val) or r_val <= 0:
+                raise ValueError(f"Linha {i + 1}: o raio deve ser maior que zero.")
 
             if idx_name is not None and idx_name >= 0:
                 try:
@@ -362,9 +367,10 @@ class ComparePanel(QGroupBox):
 
     # Emits list of ComparePoint instances
     compare_requested = Signal(list)
-    open_map_requested = Signal(list)        # list[ComparePoint]
-    bulk_download_requested = Signal(str)    # target directory
-    map_tiff_requested = Signal(str)         # output file path
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API
+        """Allow the form to reflow inside notebook-sized viewports."""
+        return QSize(520, 420)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(t("compare.title"), parent)
@@ -403,6 +409,9 @@ class ComparePanel(QGroupBox):
 
         # ── Stacked input area ─────────────────────────────────────────
         self._stack = QStackedWidget()
+        self._stack.setSizePolicy(
+            QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred
+        )
 
         # Manual page
         self._manual_page = QWidget()
@@ -448,25 +457,6 @@ class ComparePanel(QGroupBox):
         radius_row.addStretch()
         root.addLayout(radius_row)
 
-        # ── Preview area ───────────────────────────────────────────────
-        self._lbl_preview_title = QLabel("<b>" + t("compare_extra.preview_title") + "</b>")
-        root.addWidget(self._lbl_preview_title)
-        self._lbl_preview_count = QLabel("")
-        self._lbl_preview_count.setStyleSheet("color:#555;font-size:12px;")
-        root.addWidget(self._lbl_preview_count)
-        self._txt_preview = QPlainTextEdit()
-        self._txt_preview.setReadOnly(True)
-        self._txt_preview.setMaximumHeight(80)
-        self._txt_preview.setStyleSheet("font-family: monospace; font-size: 11px;")
-        root.addWidget(self._txt_preview)
-
-        prev_row = QHBoxLayout()
-        self._btn_preview = QPushButton(t("compare_extra.preview_btn"))
-        self._btn_preview.clicked.connect(self._on_preview)
-        prev_row.addWidget(self._btn_preview)
-        prev_row.addStretch()
-        root.addLayout(prev_row)
-
         # ── Compare button ─────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -479,48 +469,6 @@ class ComparePanel(QGroupBox):
         self._btn_compare.clicked.connect(self._on_compare)
         btn_row.addWidget(self._btn_compare)
         root.addLayout(btn_row)
-
-        # ── Post-analysis actions ──────────────────────────────────────
-        actions = QHBoxLayout()
-        self._btn_open_map = QPushButton(t("compare_extra.show_map_btn"))
-        self._btn_open_map.clicked.connect(self._on_open_map)
-        self._btn_bulk_dl = QPushButton(t("compare_extra.bulk_download_btn"))
-        self._btn_bulk_dl.clicked.connect(self._on_bulk_download)
-        self._btn_map_tiff = QPushButton(t("compare_extra.map_tiff_btn"))
-        self._btn_map_tiff.clicked.connect(self._on_map_tiff)
-        actions.addWidget(self._btn_open_map)
-        actions.addWidget(self._btn_bulk_dl)
-        actions.addWidget(self._btn_map_tiff)
-        actions.addStretch()
-        root.addLayout(actions)
-
-        # ── Gradient chart (matplotlib) ────────────────────────────────
-        grad_row = QHBoxLayout()
-        self._lbl_gradient = QLabel("<b>" + t("compare_extra.gradient_title") + "</b>")
-        self._lbl_grad_metric = QLabel(t("compare_extra.gradient_metric") + ":")
-        self._cmb_grad_metric = QComboBox()
-        self._cmb_grad_metric.addItem("ISA (%)", "isa")
-        self._cmb_grad_metric.addItem("SHDI", "shdi")
-        self._cmb_grad_metric.addItem("SIDI", "sidi")
-        self._cmb_grad_metric.addItem("LPI", "lpi")
-        self._cmb_grad_metric.addItem("Patches", "patches")
-        self._cmb_grad_metric.currentIndexChanged.connect(self._redraw_gradient)
-        grad_row.addWidget(self._lbl_gradient)
-        grad_row.addSpacing(16)
-        grad_row.addWidget(self._lbl_grad_metric)
-        grad_row.addWidget(self._cmb_grad_metric)
-        grad_row.addStretch()
-        root.addLayout(grad_row)
-
-        self._gradient_canvas = None
-        if _MPL_OK:
-            self._gradient_fig = Figure(figsize=(5, 2.2), tight_layout=True)
-            self._gradient_canvas = _FigCanvas(self._gradient_fig)
-            self._gradient_canvas.setMinimumHeight(150)
-            self._gradient_canvas.setSizePolicy(
-                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred,
-            )
-            root.addWidget(self._gradient_canvas)
 
         # ── Results table ──────────────────────────────────────────────
         self._table = QTableWidget()
@@ -566,79 +514,6 @@ class ComparePanel(QGroupBox):
         for i, r in enumerate(self._point_rows):
             r.index = i
             r.refresh_texts()
-
-    # ── Preview / actions ──────────────────────────────────────────────
-
-    def _on_preview(self) -> None:
-        try:
-            pts = self._collect_points()
-        except ValueError as exc:
-            QMessageBox.warning(self, "Error", t("compare.parse_error", msg=str(exc)))
-            return
-        self._lbl_preview_count.setText(t("compare_extra.preview_count", n=len(pts)))
-        lines = [
-            f"{p.name:<24}  lat={p.lat:+.5f}  lon={p.lon:+.5f}  r={p.radius:.0f}m"
-            for p in pts
-        ]
-        self._txt_preview.setPlainText("\n".join(lines))
-
-    def _on_open_map(self) -> None:
-        try:
-            pts = self._collect_points()
-        except ValueError:
-            return
-        if pts:
-            self.open_map_requested.emit(pts)
-
-    def _on_bulk_download(self) -> None:
-        if not self._last_results:
-            QMessageBox.warning(self, "", t("compare_extra.bulk_download_no_data"))
-            return
-        path = QFileDialog.getExistingDirectory(self, t("compare_extra.bulk_download_dir"))
-        if path:
-            self.bulk_download_requested.emit(path)
-
-    def _on_map_tiff(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, t("compare_extra.map_tiff_btn"), "luma_compare_map.tif",
-            "TIFF (*.tif *.tiff)",
-        )
-        if path:
-            self.map_tiff_requested.emit(path)
-
-    def _redraw_gradient(self) -> None:
-        if not _MPL_OK or self._gradient_canvas is None or not self._last_results:
-            return
-        accessors = {
-            "isa": lambda m: m.isa_index,
-            "shdi": lambda m: m.shannon_diversity,
-            "sidi": lambda m: m.simpson_diversity,
-            "lpi": lambda m: m.largest_patch_index,
-            "patches": lambda m: m.total_patches,
-        }
-        key = self._cmb_grad_metric.currentData() or "isa"
-        acc = accessors[key]
-        labels = [r["point_label"] for r in self._last_results]
-        values = [acc(r["landscape_metrics"]) for r in self._last_results]
-        self._gradient_fig.clear()
-        ax = self._gradient_fig.add_subplot(111)
-        import numpy as _np
-        x = _np.arange(len(labels))
-        if len(values) >= 2:
-            vmin, vmax = min(values), max(values)
-            span = (vmax - vmin) or 1.0
-            colors_ = [
-                (1 - (v - vmin) / span, 0.4, (v - vmin) / span)
-                for v in values
-            ]
-            ax.bar(x, values, color=colors_, edgecolor="#222")
-        else:
-            ax.bar(x, values)
-        ax.plot(x, values, color="#222", marker="o", linewidth=1)
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
-        ax.set_ylabel(self._cmb_grad_metric.currentText())
-        self._gradient_canvas.draw_idle()
 
     # ── Compare ────────────────────────────────────────────────────────
 
@@ -740,7 +615,6 @@ class ComparePanel(QGroupBox):
 
         self._table.resizeColumnsToContents()
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._redraw_gradient()
 
     # ── i18n refresh ───────────────────────────────────────────────────
 
@@ -758,13 +632,6 @@ class ComparePanel(QGroupBox):
             row.refresh_texts()
         self._paste_page.refresh_texts()
         self._excel_page.refresh_texts()
-        self._lbl_preview_title.setText("<b>" + t("compare_extra.preview_title") + "</b>")
-        self._btn_preview.setText(t("compare_extra.preview_btn"))
-        self._btn_open_map.setText(t("compare_extra.show_map_btn"))
-        self._btn_bulk_dl.setText(t("compare_extra.bulk_download_btn"))
-        self._btn_map_tiff.setText(t("compare_extra.map_tiff_btn"))
-        self._lbl_gradient.setText("<b>" + t("compare_extra.gradient_title") + "</b>")
-        self._lbl_grad_metric.setText(t("compare_extra.gradient_metric") + ":")
         if self._last_results:
             self.update_results(self._last_results)
 
@@ -784,7 +651,10 @@ def _to_float(val) -> float:
         s = s.replace(".", "").replace(",", ".")
     else:
         s = s.replace(",", ".")
-    return float(s)
+    value = float(s)
+    if not math.isfinite(value):
+        raise ValueError("non-finite")
+    return value
 
 
 def _parse_delimited(raw: str) -> tuple[list[str], list[list[str]]]:

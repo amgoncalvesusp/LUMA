@@ -47,6 +47,13 @@ class SourceSelector(QGroupBox):
         remote_row.addWidget(self._combo_source, stretch=1)
         layout.addLayout(remote_row)
 
+        year_row = QHBoxLayout()
+        self._lbl_year = QLabel(t("input.year"))
+        self._combo_year = QComboBox()
+        year_row.addWidget(self._lbl_year)
+        year_row.addWidget(self._combo_year, stretch=1)
+        layout.addLayout(year_row)
+
         layout.addWidget(self._radio_local)
 
         # Local file picker
@@ -104,7 +111,7 @@ class SourceSelector(QGroupBox):
         self._radio_remote.toggled.connect(self._on_mode_changed)
         self._radio_local.toggled.connect(self._on_mode_changed)
         self._combo_source.currentIndexChanged.connect(
-            lambda: self.source_changed.emit()
+            self._on_source_changed
         )
         self._combo_legend.currentIndexChanged.connect(
             lambda: self.source_changed.emit()
@@ -114,6 +121,7 @@ class SourceSelector(QGroupBox):
         )
 
         self._on_mode_changed()
+        self._on_source_changed()
         self._on_download_source_changed()
 
     def _populate_sources(self) -> None:
@@ -172,8 +180,26 @@ class SourceSelector(QGroupBox):
     def _on_mode_changed(self) -> None:
         is_remote = self._radio_remote.isChecked()
         self._combo_source.setEnabled(is_remote)
+        self._combo_year.setEnabled(is_remote and self._combo_year.count() > 1)
         self._btn_file.setEnabled(not is_remote)
         self._combo_legend.setEnabled(not is_remote)
+
+    def _on_source_changed(self, *_args) -> None:
+        self._combo_year.blockSignals(True)
+        self._combo_year.clear()
+        source = self._combo_source.currentData()
+        if source:
+            years_range = source.get("years_range")
+            years = source.get("years")
+            if years_range:
+                years = list(range(int(years_range[0]), int(years_range[1]) + 1))
+            for year in years or []:
+                self._combo_year.addItem(str(year), userData=int(year))
+        if self._combo_year.count():
+            self._combo_year.setCurrentIndex(self._combo_year.count() - 1)
+        self._combo_year.blockSignals(False)
+        self._on_mode_changed()
+        self.source_changed.emit()
 
     @property
     def is_remote(self) -> bool:
@@ -186,8 +212,19 @@ class SourceSelector(QGroupBox):
         return None
 
     @property
+    def selected_source_key(self) -> str | None:
+        source = self.selected_source
+        return source.get("key") if source else None
+
+    @property
     def selected_file(self) -> str:
         return self._selected_file
+
+    @property
+    def selected_year(self) -> int | None:
+        """Return the selected year for a remote product, if declared."""
+        value = self._combo_year.currentData()
+        return int(value) if value is not None else None
 
     @property
     def selected_legend_key(self) -> str | None:
@@ -222,11 +259,42 @@ class SourceSelector(QGroupBox):
                 return "dynamic_world"
         return "esa_worldcover"
 
+    def apply_project(
+        self, *, source_key: str | None, source_year: int | None,
+        legend_key: str | None, source_file: str | None,
+    ) -> None:
+        """Restore source controls from a validated project payload."""
+        if source_key:
+            for index in range(self._combo_source.count()):
+                source = self._combo_source.itemData(index)
+                if source and source.get("key") == source_key:
+                    self._combo_source.setCurrentIndex(index)
+                    self._radio_remote.setChecked(True)
+                    break
+            if source_year is not None:
+                for index in range(self._combo_year.count()):
+                    if self._combo_year.itemData(index) == int(source_year):
+                        self._combo_year.setCurrentIndex(index)
+                        break
+        else:
+            self._selected_file = source_file or ""
+            self._lbl_file.setText(Path(self._selected_file).name if self._selected_file else "")
+            self._radio_local.setChecked(True)
+            if legend_key:
+                for index in range(self._combo_legend.count()):
+                    item = self._combo_legend.itemData(index)
+                    if item and item.get("key") == legend_key:
+                        self._combo_legend.setCurrentIndex(index)
+                        break
+        self._on_mode_changed()
+        self.source_changed.emit()
+
     def refresh_texts(self) -> None:
         """Refresh all translatable texts (called on language change)."""
         self.setTitle(t("input.source"))
         self._radio_remote.setText(t("input.remote_dataset"))
         self._radio_local.setText(t("input.local_file"))
+        self._lbl_year.setText(t("input.year"))
         self._btn_file.setText(t("input.select_file"))
         self._btn_legend_preview.setToolTip(t("input.legend_preview"))
         self._download_box.setTitle(t("input.download_data"))

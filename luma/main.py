@@ -124,7 +124,7 @@ def main() -> None:
         )
         app.setApplicationName("LUMA")
         app.setOrganizationName("UNIARA")
-        app.setApplicationVersion("1.1.0")
+        app.setApplicationVersion("1.2.0")
         icon_path = _resource_path("icons", "brazil_map.png")
         _write_log(f"Loading icon={icon_path} exists={os.path.exists(icon_path)}")
         app_icon = QIcon(icon_path)
@@ -218,7 +218,7 @@ QTabWidget::pane {
     top: -1px;
 }
 QTabBar::tab {
-    padding: 9px 22px;
+    padding: 8px 14px;
     margin-right: 3px;
     border: 1px solid #d5dbe0;
     border-bottom: none;
@@ -256,6 +256,9 @@ QPushButton:hover {
 }
 QPushButton:pressed {
     background: #d5dbe0;
+}
+QPushButton:focus {
+    border: 2px solid #2980b9;
 }
 QPushButton:disabled {
     color: #bdc3c7;

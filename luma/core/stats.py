@@ -55,6 +55,59 @@ class AnalysisResult:
     quality_warnings: list[str] = field(default_factory=list)
     source_name: str = ""
     source_accuracy: str = ""
+    # Optional clipped raster payload used only for thematic map rendering.
+    # Keeping it optional preserves report/export compatibility for callers
+    # that construct AnalysisResult from statistics alone.
+    raster_data: object | None = field(default=None, repr=False)
+    raster_valid_mask: object | None = field(default=None, repr=False)
+    raster_transform: object | None = field(default=None, repr=False)
+    raster_crs: object | None = field(default=None, repr=False)
+    provenance: dict[str, object] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class LegendValidation:
+    """Relationship between IDs observed in a raster and a legend."""
+
+    raster_ids: tuple[int, ...]
+    legend_ids: tuple[int, ...]
+    unknown_ids: tuple[int, ...]
+    unused_ids: tuple[int, ...]
+
+    @property
+    def is_valid(self) -> bool:
+        return not self.unknown_ids
+
+
+def _validate_array_inputs(data: np.ndarray, valid_mask: np.ndarray) -> None:
+    if data.ndim != 2:
+        raise ValueError(f"Raster data must be 2-D, got shape {data.shape}")
+    if valid_mask.shape != data.shape:
+        raise ValueError(
+            f"valid_mask shape {valid_mask.shape} does not match raster shape {data.shape}"
+        )
+    if valid_mask.dtype != bool:
+        raise ValueError("valid_mask must have boolean dtype")
+
+
+def validate_legend_classes(
+    data: np.ndarray,
+    valid_mask: np.ndarray,
+    legend: dict[int, dict],
+    *,
+    strict: bool = False,
+) -> LegendValidation:
+    """Validate that every valid raster class has a legend entry."""
+    _validate_array_inputs(data, valid_mask)
+    raster_ids = tuple(int(v) for v in np.unique(data[valid_mask]))
+    legend_ids = tuple(sorted(int(v) for v in legend))
+    unknown = tuple(v for v in raster_ids if v not in legend)
+    unused = tuple(v for v in legend_ids if v not in raster_ids)
+    result = LegendValidation(raster_ids, legend_ids, unknown, unused)
+    if strict and unknown:
+        ids = ", ".join(str(v) for v in unknown)
+        raise ValueError(f"Raster contains class IDs absent from legend: {ids}")
+    return result
 
 
 def compute_class_statistics(
@@ -76,7 +129,14 @@ def compute_class_statistics(
     legend : dict
         Mapping of class_id -> {"name": str, "color": str}.
     """
-    valid_data = data[valid_mask]
+    _validate_array_inputs(data, valid_mask)
+    effective_mask = valid_mask
+    # Legacy rasters often have no explicit mask and use zero as NoData.  If
+    # the chosen legend does not define class zero, exclude those cells from
+    # both the denominator and patch calculations.
+    if 0 not in legend:
+        effective_mask = valid_mask & (data != 0)
+    valid_data = data[effective_mask]
     total_valid = valid_data.size
     if total_valid == 0:
         return []
@@ -86,15 +146,16 @@ def compute_class_statistics(
 
     for cls_id, count in zip(unique_classes, counts):
         cls_id = int(cls_id)
-        if cls_id == 0:
-            continue  # skip nodata-like zero class unless in legend
-            # actually check legend
+        # Zero is a legitimate class in products such as Dynamic World.  It is
+        # ignored only when the selected legend does not declare class zero.
+        if cls_id == 0 and cls_id not in legend:
+            continue
         cls_info = legend.get(cls_id, {"name": f"Class {cls_id}", "color": "#888888"})
         area = count * pixel_area_m2
         pct = (count / total_valid) * 100
 
         # Patch analysis for this class
-        class_mask = (data == cls_id) & valid_mask
+        class_mask = (data == cls_id) & effective_mask
         labelled, num_patches = ndimage.label(class_mask)
         largest_patch = 0.0
         if num_patches > 0:
@@ -124,8 +185,14 @@ def compute_landscape_metrics(
     pixel_area_m2: float,
 ) -> LandscapeMetrics:
     """Compute landscape-level diversity and fragmentation metrics."""
+    _validate_array_inputs(data, valid_mask)
     if not class_stats:
         return LandscapeMetrics()
+
+    # Keep the metric mask consistent with class statistics: zero is omitted
+    # when it is not represented in the selected legend.
+    if not any(c.class_id == 0 for c in class_stats):
+        valid_mask = valid_mask & (data != 0)
 
     total_area = sum(c.area_m2 for c in class_stats)
     if total_area == 0:
@@ -168,7 +235,14 @@ def compute_landscape_metrics(
     edge_density = total_edge_m / total_area_ha if total_area_ha > 0 else 0
 
     # Effective Mesh Size: Σ(aᵢ²) / A_total
-    mesh_size = sum(c.area_m2 ** 2 for c in class_stats) / total_area if total_area > 0 else 0
+    # Effective mesh uses connected fragment areas, not aggregate class areas.
+    all_patch_sizes_m2 = _all_patch_sizes_m2(
+        data, valid_mask, pixel_area_m2, class_ids=(c.class_id for c in class_stats)
+    )
+    mesh_size = (
+        sum(area ** 2 for area in all_patch_sizes_m2) / total_area
+        if total_area > 0 else 0
+    )
 
     # Aggregation Index (AI, %): He et al. 2000 / McGarigal & Marks 1995
     aggregation = _compute_aggregation_index(data, valid_mask, class_stats, pixel_area_m2)
@@ -184,14 +258,9 @@ def compute_landscape_metrics(
     isa_index = round(isa_area / total_area * 100, 2) if total_area > 0 else 0.0
 
     # Patch area statistics — collect sizes across all classes
-    all_patch_sizes_m2: list[float] = []
-    for cs in class_stats:
-        class_mask = (data == cs.class_id) & valid_mask
-        labelled, n_p = ndimage.label(class_mask)
-        if n_p == 0:
-            continue
-        sizes = ndimage.sum(class_mask, labelled, range(1, n_p + 1))
-        all_patch_sizes_m2.extend(float(s) * pixel_area_m2 for s in sizes)
+    all_patch_sizes_m2 = _all_patch_sizes_m2(
+        data, valid_mask, pixel_area_m2, class_ids=(c.class_id for c in class_stats)
+    )
     if all_patch_sizes_m2:
         largest_patch_area = max(all_patch_sizes_m2)
         smallest_patch_area = min(all_patch_sizes_m2)
@@ -217,6 +286,25 @@ def compute_landscape_metrics(
         mean_patch_area_m2=round(mean_patch_area, 2),
         isa_index=isa_index,
     )
+
+
+def _all_patch_sizes_m2(
+    data: np.ndarray,
+    valid_mask: np.ndarray,
+    pixel_area_m2: float,
+    class_ids=None,
+) -> list[float]:
+    """Return areas of all 4-connected valid patches in square metres."""
+    sizes_m2: list[float] = []
+    ids = np.unique(data[valid_mask]) if class_ids is None else class_ids
+    for cls_id in ids:
+        class_mask = (data == cls_id) & valid_mask
+        labelled, n_patches = ndimage.label(class_mask)
+        if n_patches == 0:
+            continue
+        sizes = ndimage.sum(class_mask, labelled, range(1, n_patches + 1))
+        sizes_m2.extend(float(size) * pixel_area_m2 for size in sizes)
+    return sizes_m2
 
 
 def _count_edge_pixels(data: np.ndarray, valid_mask: np.ndarray) -> int:
@@ -409,6 +497,8 @@ def compute_transition_matrix(
     valid_mask_t2: np.ndarray,
     pixel_area_m2: float,
     legend: dict[int, dict],
+    *,
+    strict_legend: bool = False,
 ) -> dict:
     """Compute a land-cover transition matrix between two time periods.
 
@@ -420,12 +510,27 @@ def compute_transition_matrix(
         "persistence" : float  — % of area unchanged
         "net_change" : dict[int, float]  — net area change per class in m²
     """
+    _validate_array_inputs(data_t1, valid_mask_t1)
+    _validate_array_inputs(data_t2, valid_mask_t2)
+    if data_t1.shape != data_t2.shape:
+        raise ValueError(
+            "Temporal rasters must be aligned to the same shape before transition analysis"
+        )
     combined_mask = valid_mask_t1 & valid_mask_t2
     d1 = data_t1[combined_mask]
     d2 = data_t2[combined_mask]
+    if 0 not in legend:
+        non_nodata = (d1 != 0) & (d2 != 0)
+        d1 = d1[non_nodata]
+        d2 = d2[non_nodata]
 
     all_classes = sorted(set(np.unique(d1).tolist()) | set(np.unique(d2).tolist()))
-    all_classes = [c for c in all_classes if c in legend]
+    if 0 not in legend:
+        all_classes = [c for c in all_classes if c != 0]
+    unknown = [int(c) for c in all_classes if int(c) not in legend]
+    if strict_legend and unknown:
+        ids = ", ".join(str(v) for v in unknown)
+        raise ValueError(f"Raster contains class IDs absent from legend: {ids}")
 
     matrix: dict[int, dict[int, float]] = {}
     for c1 in all_classes:

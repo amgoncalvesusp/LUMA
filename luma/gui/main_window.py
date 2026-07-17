@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import traceback
+import math
 from pathlib import Path
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
     QTabWidget, QStatusBar, QMenuBar, QMessageBox, QFileDialog,
-    QSplitter, QLabel, QComboBox, QApplication, QProgressDialog,
-    QScrollArea,
+    QSplitter, QLabel, QComboBox, QApplication, QProgressDialog, QScrollArea,
 )
-from PySide6.QtCore import Qt, QThread, Signal, QObject
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QSize
 from PySide6.QtGui import QAction
 
 import luma
@@ -19,19 +19,34 @@ from luma.i18n.translator import t, init as i18n_init, set_language, AVAILABLE_L
 from luma.gui.widgets.coord_input import LatitudeInput, LongitudeInput, RadiusInput
 from luma.gui.widgets.source_selector import SourceSelector
 from luma.gui.widgets.map_viewer import MapViewer
-from luma.gui.widgets.results_table import ResultsTable, MetricsPanel, WarningsPanel
+from luma.gui.widgets.results_table import (
+    ResultsTable, MetricsPanel, SummaryPanel, WarningsPanel,
+)
 from luma.gui.widgets.help_bubble import HelpBubble, labeled_input_with_help
 from luma.gui.widgets.temporal_panel import TemporalPanel
 from luma.gui.widgets.compare_panel import ComparePanel
+from luma.gui.widgets.aoi_widget import AOIWidget
+from luma.gui.widgets.objective_selector import ObjectiveSelector
+from luma.gui.widgets.aoi_comparison_panel import AOIComparisonPanel
+from luma.gui.task_runner import TaskWorker
 from luma.gui.dialogs.about import AboutDialog
 from luma.gui.dialogs.settings import SettingsDialog
-from luma.core.raster import clip_raster_to_buffer
+from luma.core.raster import (
+    clip_raster_to_buffer, clip_raster_to_geometry,
+    align_raster_pair, align_raster_to_reference,
+)
+from luma.core.aoi import AOI
 from luma.core.stats import (
     compute_class_statistics, compute_landscape_metrics,
     generate_quality_warnings, AnalysisResult, compute_transition_matrix,
+    validate_legend_classes,
 )
 from luma.core.buffer import buffer_geojson, buffer_area_km2
-from luma.sources.catalog import load_legend_classes, get_source, load_legend, resolve_remote_url
+from luma.core.project import build_project, load_project, save_project
+from luma.output.serialization import serializable_parameters
+from luma.sources.catalog import (
+    load_legend_classes, get_source, load_legend, resolve_remote_url, validate_year,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -42,13 +57,14 @@ class AnalysisWorker(QObject):
     progress = Signal(str)
 
     def __init__(self, source_path: str, lon: float, lat: float,
-                 radius_m: float, legend_key: str):
+                 radius_m: float, legend_key: str, aoi: AOI | None = None):
         super().__init__()
         self.source_path = source_path
         self.lon = lon
         self.lat = lat
         self.radius_m = radius_m
         self.legend_key = legend_key
+        self.aoi = aoi
 
     def run(self) -> None:
         try:
@@ -56,34 +72,64 @@ class AnalysisWorker(QObject):
             legend_classes = load_legend_classes(self.legend_key)
             legend_meta = load_legend(self.legend_key)
 
-            raster = clip_raster_to_buffer(
-                self.source_path, self.lon, self.lat, self.radius_m
+            if self.aoi is not None:
+                raster = clip_raster_to_geometry(self.source_path, self.aoi)
+            else:
+                raster = clip_raster_to_buffer(
+                    self.source_path, self.lon, self.lat, self.radius_m
+                )
+            valid_mask = raster.valid_mask_for_legend(legend_classes)
+            legend_validation = validate_legend_classes(
+                raster.data, valid_mask, legend_classes
             )
 
             class_stats = compute_class_statistics(
-                raster.data, raster.valid_mask, raster.pixel_area_m2, legend_classes
+                raster.data, valid_mask, raster.pixel_area_m2, legend_classes
             )
             landscape = compute_landscape_metrics(
-                class_stats, raster.data, raster.valid_mask, raster.pixel_area_m2
+                class_stats, raster.data, valid_mask, raster.pixel_area_m2
             )
+            warning_radius = self.radius_m
+            if self.aoi is not None:
+                warning_radius = math.sqrt(self.aoi.area_m2 / math.pi)
             warnings = generate_quality_warnings(
-                raster.total_pixels, raster.pixel_area_m2, self.radius_m
+                int(valid_mask.sum()), raster.pixel_area_m2, warning_radius
             )
+            valid_pixels = int(valid_mask.sum())
 
             result = AnalysisResult(
                 class_stats=class_stats,
                 landscape_metrics=landscape,
-                total_area_m2=raster.total_pixels * raster.pixel_area_m2,
-                total_valid_pixels=raster.total_pixels,
+                total_area_m2=valid_pixels * raster.pixel_area_m2,
+                total_valid_pixels=valid_pixels,
                 pixel_area_m2=raster.pixel_area_m2,
                 quality_warnings=warnings,
                 source_name=legend_meta.get("name", self.legend_key),
                 source_accuracy=legend_meta.get("reported_accuracy", "N/A"),
+                raster_data=raster.data,
+                raster_valid_mask=valid_mask,
+                raster_transform=raster.transform,
+                raster_crs=raster.crs,
+                provenance={
+                    "legend_key": self.legend_key,
+                    "crs": str(raster.crs),
+                    "pixel_area_m2": raster.pixel_area_m2,
+                    "width": int(raster.data.shape[1]),
+                    "height": int(raster.data.shape[0]),
+                    "unknown_class_ids": legend_validation.unknown_ids,
+                },
             )
             self.finished.emit(result)
 
         except Exception as exc:
             self.finished.emit(exc)
+
+
+class ResponsiveTabWidget(QTabWidget):
+    """Tab widget whose labels never dictate the application minimum width."""
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API
+        return QSize(360, 280)
 
 
 # ---------------------------------------------------------------------------
@@ -93,16 +139,21 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        i18n_init("en")
+        # Portuguese is the default because the primary audience is Brazilian
+        # academic users; English remains available through Settings.
+        i18n_init("pt_BR")
         self._last_result: AnalysisResult | None = None
         self._last_params: dict = {}
         self._last_temporal: dict | None = None
         self._last_temporal_years: tuple[int, int] = (0, 0)
         self._last_temporal_series: list[dict] | None = None
         self._last_compare: list[dict] | None = None
+        self._aoi: AOI | None = None
+        self._active_task_thread: QThread | None = None
+        self._auto_compact = False
         self._setup_ui()
         self._setup_menu()
-        self.setMinimumSize(1200, 750)
+        self.setMinimumSize(520, 420)
         self.setWindowTitle(t("app.title"))
         self._status_bar = QStatusBar()
         self.setStatusBar(self._status_bar)
@@ -116,12 +167,17 @@ class MainWindow(QMainWindow):
         root = QHBoxLayout(central)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._main_splitter = splitter
         root.addWidget(splitter)
 
         # ── Left panel (input) ────────────────────────────────────────────
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(8, 8, 8, 8)
+
+        self._objective_selector = ObjectiveSelector()
+        self._objective_selector.objective_changed.connect(self._on_objective_changed)
+        left_layout.addWidget(self._objective_selector)
 
         # Coordinate inputs
         self._lat_input = LatitudeInput(-23.55)
@@ -141,12 +197,12 @@ class MainWindow(QMainWindow):
         )
         left_layout.addLayout(lay)
 
-        # Paste "lat, lon" pair into either field fills both
-        def _set_pair(lat: float, lon: float) -> None:
-            self._lat_input.setValue(lat)
-            self._lon_input.setValue(lon)
-        self._lat_input.pair_pasted.connect(_set_pair)
-        self._lon_input.pair_pasted.connect(_set_pair)
+        self._aoi_widget = AOIWidget()
+        self._aoi_widget.canvas.setMinimumSize(260, 130)
+        self._aoi_widget.setMaximumHeight(245)
+        self._aoi_widget.set_extent((-46.8, -23.7, -46.5, -23.4))
+        self._aoi_widget.aoi_changed.connect(self._on_aoi_changed)
+        left_layout.addWidget(self._aoi_widget)
 
         # Source selector
         self._source_selector = SourceSelector()
@@ -155,33 +211,80 @@ class MainWindow(QMainWindow):
         # Analyze button
         self._btn_analyze = QPushButton(t("input.analyze"))
         self._btn_analyze.setStyleSheet(
-            "QPushButton { background: #27ae60; color: white; padding: 10px; "
+            "QPushButton { background: #1b7f3b; color: white; padding: 10px; "
             "border-radius: 5px; font-size: 15px; font-weight: bold; }"
-            "QPushButton:hover { background: #219a52; }"
+            "QPushButton:hover { background: #176b32; }"
+            "QPushButton:focus { border: 2px solid #0b3d1b; }"
             "QPushButton:disabled { background: #95a5a6; }"
         )
         self._btn_analyze.clicked.connect(self._run_analysis)
-        left_layout.addWidget(self._btn_analyze)
 
         left_layout.addStretch()
-        left.setMaximumWidth(400)
-        splitter.addWidget(left)
+        left.setMinimumWidth(260)
+        left.setMaximumWidth(370)
+        self._input_form = left
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        left_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        left_scroll.setWidget(left)
+        self._left_column = QWidget()
+        left_column_layout = QVBoxLayout(self._left_column)
+        left_column_layout.setContentsMargins(0, 0, 0, 8)
+        left_column_layout.setSpacing(6)
+        left_column_layout.addWidget(left_scroll, stretch=1)
+        self._btn_compact_results = QPushButton(t("input.view_results"))
+        self._btn_compact_results.clicked.connect(
+            lambda: self._set_input_panel_visible(False)
+        )
+        self._btn_compact_results.setVisible(False)
+        left_column_layout.addWidget(self._btn_compact_results)
+        left_column_layout.addWidget(self._btn_analyze)
+        self._left_column.setMinimumWidth(260)
+        self._left_column.setMaximumWidth(370)
+        splitter.addWidget(self._left_column)
 
         # ── Right panel (tabs: results / temporal / compare) ──────────────
         right = QWidget()
+        self._right_panel = right
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(4, 4, 4, 4)
 
-        self._tabs = QTabWidget()
+        self._compact_controls = QWidget()
+        compact_layout = QHBoxLayout(self._compact_controls)
+        compact_layout.setContentsMargins(0, 0, 0, 0)
+        compact_layout.addStretch()
+        self._btn_open_inputs = QPushButton(t("input.parameters"))
+        self._btn_open_inputs.setStyleSheet(
+            "QPushButton { background: #176ca6; color: white; padding: 7px 14px; "
+            "border-radius: 4px; font-weight: bold; }"
+            "QPushButton:hover { background: #125781; }"
+        )
+        self._btn_open_inputs.clicked.connect(
+            lambda: self._set_input_panel_visible(True)
+        )
+        compact_layout.addWidget(self._btn_open_inputs)
+        self._compact_controls.setVisible(False)
+        right_layout.addWidget(self._compact_controls)
+
+        self._tabs = ResponsiveTabWidget()
+        self._tabs.setDocumentMode(True)
+        self._tabs.setElideMode(Qt.TextElideMode.ElideRight)
+        self._tabs.tabBar().setUsesScrollButtons(True)
+        self._tabs.currentChanged.connect(self._on_tab_changed)
 
         # -- Tab 1: Single Analysis --
         tab_single = QWidget()
         tab_single_layout = QVBoxLayout(tab_single)
+        tab_single_layout.setContentsMargins(0, 0, 0, 0)
 
         # Map + results split vertically
         inner_splitter = QSplitter(Qt.Orientation.Vertical)
 
         self._map_viewer = MapViewer()
+        self._map_viewer.setMinimumHeight(220)
         inner_splitter.addWidget(self._map_viewer)
 
         results_widget = QWidget()
@@ -191,47 +294,79 @@ class MainWindow(QMainWindow):
         self._warnings_panel = WarningsPanel()
         results_layout.addWidget(self._warnings_panel)
 
+        self._summary_panel = SummaryPanel()
+        results_layout.addWidget(self._summary_panel)
+
         self._results_table = ResultsTable()
-        results_layout.addWidget(self._results_table)
-
         self._metrics_panel = MetricsPanel()
-        results_layout.addWidget(self._metrics_panel)
-        results_layout.addStretch()
 
-        results_scroll = QScrollArea()
-        results_scroll.setWidgetResizable(True)
-        results_scroll.setWidget(results_widget)
-        inner_splitter.addWidget(results_scroll)
-        inner_splitter.setSizes([350, 450])
-        inner_splitter.setHandleWidth(6)
+        self._result_tabs = QTabWidget()
+        self._result_tabs.setDocumentMode(True)
+        self._result_tabs.addTab(self._results_table, t("tabs.coverage"))
+        metrics_scroll = QScrollArea()
+        metrics_scroll.setWidgetResizable(True)
+        metrics_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        metrics_scroll.setWidget(self._metrics_panel)
+        self._result_tabs.addTab(metrics_scroll, t("tabs.metrics"))
+        results_layout.addWidget(self._result_tabs)
+
+        inner_splitter.addWidget(results_widget)
         inner_splitter.setChildrenCollapsible(False)
+        inner_splitter.setStretchFactor(0, 3)
+        inner_splitter.setStretchFactor(1, 2)
+        inner_splitter.setSizes([420, 300])
 
         tab_single_layout.addWidget(inner_splitter)
-        self._tabs.addTab(tab_single, t("tabs.single"))
+        single_scroll = QScrollArea()
+        single_scroll.setWidgetResizable(True)
+        single_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        single_scroll.setWidget(tab_single)
+        self._tabs.addTab(single_scroll, t("tabs.single"))
 
         # -- Tab 2: Temporal Analysis --
         self._temporal_panel = TemporalPanel()
         self._temporal_panel.analyze_requested.connect(self._run_temporal_analysis)
         self._temporal_panel.analyze_multi_requested.connect(self._run_temporal_series)
-        self._tabs.addTab(self._temporal_panel, t("tabs.temporal"))
+        temporal_scroll = QScrollArea()
+        self._temporal_scroll = temporal_scroll
+        temporal_scroll.setWidgetResizable(True)
+        temporal_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        temporal_scroll.setWidget(self._temporal_panel)
+        self._tabs.addTab(temporal_scroll, t("tabs.temporal"))
 
         # -- Tab 3: Compare Points --
         self._compare_panel = ComparePanel()
         self._compare_panel.compare_requested.connect(self._run_comparison)
-        self._compare_panel.open_map_requested.connect(self._on_compare_open_map)
-        self._compare_panel.bulk_download_requested.connect(self._on_compare_bulk_download)
-        self._compare_panel.map_tiff_requested.connect(self._on_compare_map_tiff)
-        self._tabs.addTab(self._compare_panel, t("tabs.compare"))
+        compare_scroll = QScrollArea()
+        compare_scroll.setWidgetResizable(True)
+        compare_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        compare_scroll.setWidget(self._compare_panel)
+        self._tabs.addTab(compare_scroll, t("tabs.compare"))
 
         # -- Tab 4: Compare Map --
         self._compare_map_viewer = MapViewer()
         self._tabs.addTab(self._compare_map_viewer, t("tabs.compare_map"))
 
+        # -- Tab 5: Compare polygonal AOIs --
+        aoi_compare_tab = QWidget()
+        aoi_compare_layout = QVBoxLayout(aoi_compare_tab)
+        self._aoi_compare_panel = AOIComparisonPanel()
+        self._aoi_compare_panel.analyze_requested.connect(self._run_aoi_comparison)
+        self._aoi_compare_results = ResultsTable()
+        aoi_compare_layout.addWidget(self._aoi_compare_panel, stretch=3)
+        aoi_compare_layout.addWidget(self._aoi_compare_results, stretch=2)
+        aoi_compare_scroll = QScrollArea()
+        aoi_compare_scroll.setWidgetResizable(True)
+        aoi_compare_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        aoi_compare_scroll.setWidget(aoi_compare_tab)
+        self._tabs.addTab(aoi_compare_scroll, t("tabs.compare_aois"))
+
         right_layout.addWidget(self._tabs)
         splitter.addWidget(right)
-        splitter.setSizes([350, 850])
-        splitter.setHandleWidth(6)
         splitter.setChildrenCollapsible(False)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([320, 880])
 
     def _setup_menu(self) -> None:
         menu_bar = self.menuBar()
@@ -239,6 +374,15 @@ class MainWindow(QMainWindow):
 
         # File menu
         file_menu = menu_bar.addMenu(t("menu.file"))
+        save_project_action = QAction(t("menu.save_project"), self)
+        save_project_action.triggered.connect(self._save_project)
+        file_menu.addAction(save_project_action)
+
+        open_project_action = QAction(t("menu.open_project"), self)
+        open_project_action.triggered.connect(self._open_project)
+        file_menu.addAction(open_project_action)
+        file_menu.addSeparator()
+
         export_csv = QAction(t("menu.export_csv"), self)
         export_csv.triggered.connect(self._export_csv)
         file_menu.addAction(export_csv)
@@ -270,6 +414,13 @@ class MainWindow(QMainWindow):
         settings_act.triggered.connect(self._open_settings)
         settings_menu.addAction(settings_act)
 
+        view_menu = menu_bar.addMenu(t("menu.view"))
+        self._toggle_inputs_action = QAction(t("menu.input_panel"), self)
+        self._toggle_inputs_action.setCheckable(True)
+        self._toggle_inputs_action.setChecked(not self._left_column.isHidden())
+        self._toggle_inputs_action.triggered.connect(self._set_input_panel_visible)
+        view_menu.addAction(self._toggle_inputs_action)
+
         # Help menu
         help_menu = menu_bar.addMenu(t("menu.help"))
         about_act = QAction(t("menu.about"), self)
@@ -278,10 +429,73 @@ class MainWindow(QMainWindow):
 
     # ── Analysis logic ────────────────────────────────────────────────────
 
+    def _on_aoi_changed(self, aoi: AOI | None) -> None:
+        self._aoi = aoi
+        if aoi is not None:
+            lat, lon = aoi.centroid_wgs84
+            self._lat_input.setValue(lat)
+            self._lon_input.setValue(lon)
+            self._map_viewer.show_aoi(aoi, center=(lat, lon))
+
+    def _on_objective_changed(self, objective: str) -> None:
+        """Open the tab matching the user's research question."""
+        tab_by_objective = {"single": 0, "temporal": 1, "compare": 2, "compare_aois": 4}
+        index = tab_by_objective.get(objective)
+        if index is not None:
+            self._tabs.setCurrentIndex(index)
+
+    def _on_tab_changed(self, index: int) -> None:
+        objective_by_tab = {
+            0: "single", 1: "temporal", 2: "compare", 4: "compare_aois",
+        }
+        objective = objective_by_tab.get(index)
+        if objective:
+            self._objective_selector.set_objective(objective)
+
+    def _apply_input_panel_visibility(self, visible: bool) -> None:
+        compact = self.width() < 720
+        maximum_input_width = 16_777_215 if compact and visible else 370
+        self._input_form.setMaximumWidth(maximum_input_width)
+        self._left_column.setMaximumWidth(maximum_input_width)
+        self._left_column.setVisible(visible)
+        self._right_panel.setVisible(not visible if compact else True)
+        self._compact_controls.setVisible(compact and not visible)
+        self._btn_compact_results.setVisible(compact and visible)
+        action = getattr(self, "_toggle_inputs_action", None)
+        if action is not None:
+            action.blockSignals(True)
+            action.setChecked(visible)
+            action.blockSignals(False)
+        if visible:
+            total = max(self._main_splitter.width(), 800)
+            self._main_splitter.setSizes([min(320, total // 3), total])
+
+    def _set_input_panel_visible(self, visible: bool) -> None:
+        self._auto_compact = self.width() < 720
+        self._apply_input_panel_visibility(visible)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        if not hasattr(self, "_left_column"):
+            return
+        width = event.size().width()
+        if width < 720 and not self._left_column.isHidden():
+            self._auto_compact = True
+            self._apply_input_panel_visibility(False)
+        elif width >= 840 and self._auto_compact:
+            self._auto_compact = False
+            self._apply_input_panel_visibility(True)
+
     def _run_analysis(self) -> None:
+        if self._active_task_thread is not None or (
+            getattr(self, "_thread", None) is not None and self._thread.isRunning()
+        ):
+            QMessageBox.information(self, "Análise em andamento", "Aguarde a análise atual terminar.")
+            return
         lat = self._lat_input.value()
         lon = self._lon_input.value()
         radius = self._radius_input.value()
+        aoi = self._aoi
         legend_key = self._source_selector.get_legend_key()
 
         if self._source_selector.is_remote:
@@ -290,7 +504,11 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, "Error", "No remote source selected.")
                 return
             try:
-                source_path = resolve_remote_url(src["key"], lat, lon)
+                center_lat, center_lon = aoi.centroid_wgs84 if aoi else (lat, lon)
+                source_path = resolve_remote_url(
+                    src["key"], center_lat, center_lon,
+                    year=self._source_selector.selected_year,
+                )
             except Exception as exc:
                 QMessageBox.warning(self, "Error", f"Failed to resolve remote URL:\n{exc}")
                 return
@@ -303,25 +521,35 @@ class MainWindow(QMainWindow):
                 )
                 return
 
+        selected_source = self._source_selector.selected_source
         self._last_params = {
             "lat": lat, "lon": lon, "radius_m": radius,
-            "legend_key": legend_key, "source_path": source_path,
+            "legend_key": legend_key, "source_path": source_path, "aoi": aoi,
+            "source_key": selected_source.get("key") if selected_source else None,
+            "source_year": self._source_selector.selected_year,
+            "source_collection": selected_source.get("collection") if selected_source else None,
+            "source_resolution": selected_source.get("resolution") if selected_source else None,
         }
 
-        # Show buffer on map
-        gj = buffer_geojson(lon, lat, radius)
-        self._map_viewer.show_buffer(lat, lon, radius, gj)
+        if aoi is not None:
+            self._map_viewer.show_aoi(aoi, center=aoi.centroid_wgs84)
+        else:
+            gj = buffer_geojson(lon, lat, radius)
+            self._map_viewer.show_buffer(lat, lon, radius, gj)
 
         # Run analysis in thread
         self._btn_analyze.setEnabled(False)
         self._status_bar.showMessage(t("status.analyzing"))
 
         self._thread = QThread()
-        self._worker = AnalysisWorker(source_path, lon, lat, radius, legend_key)
+        self._worker = AnalysisWorker(
+            source_path, lon, lat, radius, legend_key, aoi=aoi
+        )
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
         self._worker.finished.connect(self._on_analysis_done)
         self._worker.finished.connect(self._thread.quit)
+        self._thread.finished.connect(lambda: setattr(self, "_thread", None))
         self._thread.start()
 
     def _on_analysis_done(self, result: AnalysisResult | Exception) -> None:
@@ -336,6 +564,7 @@ class MainWindow(QMainWindow):
             return
 
         self._last_result = result
+        self._summary_panel.update_result(result)
         self._results_table.update_results(result)
         self._metrics_panel.update_metrics(result.landscape_metrics, result.pixel_area_m2)
         self._warnings_panel.update_warnings(
@@ -346,14 +575,121 @@ class MainWindow(QMainWindow):
         lat = self._last_params["lat"]
         lon = self._last_params["lon"]
         radius = self._last_params["radius_m"]
-        gj = buffer_geojson(lon, lat, radius)
-        self._map_viewer.show_results(lat, lon, radius, result.class_stats, gj)
+        aoi = self._last_params.get("aoi")
+        if aoi is not None:
+            lat, lon = aoi.centroid_wgs84
+            radius = math.sqrt(aoi.area_m2 / math.pi)
+            self._map_viewer.show_results(
+                lat, lon, radius, result.class_stats, aoi.to_geojson(),
+                raster_data=result.raster_data,
+                raster_valid_mask=result.raster_valid_mask,
+                raster_transform=result.raster_transform,
+                raster_crs=result.raster_crs,
+            )
+        else:
+            gj = buffer_geojson(lon, lat, radius)
+            self._map_viewer.show_results(
+                lat, lon, radius, result.class_stats, gj,
+                raster_data=result.raster_data,
+                raster_valid_mask=result.raster_valid_mask,
+                raster_transform=result.raster_transform,
+                raster_crs=result.raster_crs,
+            )
 
         self._status_bar.showMessage(
             f"{t('status.done')} — {t('status.pixels_analyzed', n=result.total_valid_pixels)}"
         )
 
     # ── Temporal analysis ─────────────────────────────────────────────────
+
+    def _resolve_temporal_path(self, path: str, year: int, lat: float, lon: float) -> str:
+        """Return a local path or resolve the selected remote catalog year."""
+        if path:
+            return path
+        if not self._source_selector.is_remote:
+            raise ValueError("Selecione os dois arquivos GeoTIFF ou ative uma fonte remota.")
+        source = self._source_selector.selected_source
+        if not source:
+            raise ValueError("Nenhuma fonte remota selecionada.")
+        validate_year(source["key"], year)
+        return resolve_remote_url(source["key"], lat, lon, year=year)
+
+    def _start_background_task(self, task, callback) -> bool:
+        """Run a pure analysis callable without blocking the Qt event loop."""
+        if self._active_task_thread is not None or (
+            getattr(self, "_thread", None) is not None and self._thread.isRunning()
+        ):
+            QMessageBox.information(
+                self, "Análise em andamento", "Aguarde a análise atual terminar."
+            )
+            return False
+        thread = QThread(self)
+        worker = TaskWorker(task)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(callback)
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(lambda: setattr(self, "_active_task_thread", None))
+        self._active_task_thread = thread
+        thread.start()
+        return True
+
+    @staticmethod
+    def _compute_temporal_transition(
+        file1: str, file2: str, legend_key: str,
+        lat: float, lon: float, radius: float, aoi: AOI | None,
+    ) -> dict:
+        legend_classes = load_legend_classes(legend_key)
+        if aoi is not None:
+            r1 = clip_raster_to_geometry(file1, aoi)
+            r2 = clip_raster_to_geometry(file2, aoi)
+        else:
+            r1 = clip_raster_to_buffer(file1, lon, lat, radius)
+            r2 = clip_raster_to_buffer(file2, lon, lat, radius)
+        r1, r2 = align_raster_pair(r1, r2)
+        m1 = r1.valid_mask_for_legend(legend_classes)
+        m2 = r2.valid_mask_for_legend(legend_classes)
+        cs1 = compute_class_statistics(r1.data, m1, r1.pixel_area_m2, legend_classes)
+        cs2 = compute_class_statistics(r2.data, m2, r1.pixel_area_m2, legend_classes)
+        transition = compute_transition_matrix(
+            r1.data, r2.data, m1, m2, r1.pixel_area_m2, legend_classes
+        )
+        transition["metrics_t1"] = compute_landscape_metrics(
+            cs1, r1.data, m1, r1.pixel_area_m2
+        )
+        transition["metrics_t2"] = compute_landscape_metrics(
+            cs2, r2.data, m2, r1.pixel_area_m2
+        )
+        return transition
+
+    @staticmethod
+    def _compute_temporal_series(
+        year_file_pairs: list, legend_key: str,
+        lat: float, lon: float, radius: float, aoi: AOI | None,
+    ) -> list[dict]:
+        legend_classes = load_legend_classes(legend_key)
+        series: list[dict] = []
+        reference = None
+        for year, file_path in sorted(year_file_pairs, key=lambda x: x[0]):
+            if aoi is not None:
+                raster = clip_raster_to_geometry(file_path, aoi)
+            else:
+                raster = clip_raster_to_buffer(file_path, lon, lat, radius)
+            if reference is None:
+                reference = raster
+            else:
+                raster = align_raster_to_reference(raster, reference)
+            valid_mask = raster.valid_mask_for_legend(legend_classes)
+            cs = compute_class_statistics(
+                raster.data, valid_mask, reference.pixel_area_m2, legend_classes
+            )
+            lm = compute_landscape_metrics(
+                cs, raster.data, valid_mask, reference.pixel_area_m2
+            )
+            series.append({"year": year, "class_stats": cs, "landscape_metrics": lm})
+        return series
 
     def _run_temporal_analysis(
         self, file1: str, file2: str, year1: int, year2: int
@@ -362,41 +698,36 @@ class MainWindow(QMainWindow):
         lon = self._lon_input.value()
         radius = self._radius_input.value()
         legend_key = self._source_selector.get_legend_key()
+        aoi = self._aoi
 
         try:
-            self._status_bar.showMessage(t("status.analyzing"))
-            legend_classes = load_legend_classes(legend_key)
-
-            r1 = clip_raster_to_buffer(file1, lon, lat, radius)
-            r2 = clip_raster_to_buffer(file2, lon, lat, radius)
-
-            # Ensure same shape
-            min_h = min(r1.data.shape[0], r2.data.shape[0])
-            min_w = min(r1.data.shape[1], r2.data.shape[1])
-            d1 = r1.data[:min_h, :min_w]
-            d2 = r2.data[:min_h, :min_w]
-            m1 = r1.valid_mask[:min_h, :min_w]
-            m2 = r2.valid_mask[:min_h, :min_w]
-            cs1 = compute_class_statistics(d1, m1, r1.pixel_area_m2, legend_classes)
-            cs2 = compute_class_statistics(d2, m2, r2.pixel_area_m2, legend_classes)
-
-            transition = compute_transition_matrix(
-                d1, d2, m1, m2, r1.pixel_area_m2, legend_classes
+            center_lat, center_lon = (
+                aoi.centroid_wgs84 if aoi is not None else (lat, lon)
             )
-            transition["metrics_t1"] = compute_landscape_metrics(
-                cs1, d1, m1, r1.pixel_area_m2
-            )
-            transition["metrics_t2"] = compute_landscape_metrics(
-                cs2, d2, m2, r2.pixel_area_m2
-            )
-            self._last_temporal = transition
-            self._last_temporal_years = (year1, year2)
-            self._temporal_panel.update_results(transition, year1, year2)
-            self._status_bar.showMessage(t("status.done"))
-
+            resolved1 = self._resolve_temporal_path(file1, year1, center_lat, center_lon)
+            resolved2 = self._resolve_temporal_path(file2, year2, center_lat, center_lon)
         except Exception as exc:
-            self._status_bar.showMessage(t("status.error", msg=str(exc)))
             QMessageBox.critical(self, "Error", str(exc))
+            return
+
+        self._status_bar.showMessage(t("status.analyzing"))
+        self._start_background_task(
+            lambda: self._compute_temporal_transition(
+                resolved1, resolved2, legend_key, lat, lon, radius, aoi
+            ),
+            lambda result: self._on_temporal_done(result, year1, year2),
+        )
+        return
+
+    def _on_temporal_done(self, result, year1: int, year2: int) -> None:
+        if isinstance(result, Exception):
+            self._status_bar.showMessage(t("status.error", msg=str(result)))
+            QMessageBox.critical(self, "Error", str(result))
+            return
+        self._last_temporal = result
+        self._last_temporal_years = (year1, year2)
+        self._temporal_panel.update_results(result, year1, year2)
+        self._status_bar.showMessage(t("status.done"))
 
     def _run_temporal_series(self, year_file_pairs: list) -> None:
         """Analyse N individual years and display a longitudinal coverage table."""
@@ -404,98 +735,224 @@ class MainWindow(QMainWindow):
         lat = self._lat_input.value()
         lon = self._lon_input.value()
         radius = self._radius_input.value()
+        aoi = self._aoi
 
         try:
-            self._status_bar.showMessage(t("status.analyzing"))
-            legend_classes = load_legend_classes(legend_key)
-            series: list[dict] = []
-
-            for year, file_path in sorted(year_file_pairs, key=lambda x: x[0]):
-                r = clip_raster_to_buffer(file_path, lon, lat, radius)
-                cs = compute_class_statistics(
-                    r.data, r.valid_mask, r.pixel_area_m2, legend_classes
+            center_lat, center_lon = (
+                aoi.centroid_wgs84 if aoi is not None else (lat, lon)
+            )
+            resolved_pairs = [
+                (
+                    year,
+                    self._resolve_temporal_path(path, int(year), center_lat, center_lon),
                 )
-                lm = compute_landscape_metrics(
-                    cs, r.data, r.valid_mask, r.pixel_area_m2
-                )
-                series.append({
-                    "year": year,
-                    "class_stats": cs,
-                    "landscape_metrics": lm,
-                })
-
-            self._last_temporal_series = series
-            self._temporal_panel.set_buffer_centre(lat, lon, radius)
-            self._temporal_panel.update_series_results(series)
-            self._status_bar.showMessage(t("status.done"))
-
+                for year, path in year_file_pairs
+            ]
         except Exception as exc:
-            self._status_bar.showMessage(t("status.error", msg=str(exc)))
             QMessageBox.critical(self, "Error", str(exc))
+            return
+
+        self._status_bar.showMessage(t("status.analyzing"))
+        self._start_background_task(
+            lambda: self._compute_temporal_series(
+                resolved_pairs, legend_key, lat, lon, radius, aoi
+            ),
+            self._on_temporal_series_done,
+        )
+        return
 
     # ── Multi-point comparison ────────────────────────────────────────────
+
+    def _on_temporal_series_done(self, result) -> None:
+        if isinstance(result, Exception):
+            self._status_bar.showMessage(t("status.error", msg=str(result)))
+            QMessageBox.critical(self, "Error", str(result))
+            return
+        self._last_temporal_series = result
+        self._temporal_panel.update_series_results(result)
+        self._status_bar.showMessage(t("status.done"))
+
+    @staticmethod
+    def _compute_aoi_comparison(
+        areas: list[tuple[str, AOI, str]], legend_key: str,
+    ) -> list[dict]:
+        legend_classes = load_legend_classes(legend_key)
+        results = []
+        for label, aoi, source_path in areas:
+            raster = clip_raster_to_geometry(source_path, aoi)
+            valid_mask = raster.valid_mask_for_legend(legend_classes)
+            class_stats = compute_class_statistics(
+                raster.data, valid_mask, raster.pixel_area_m2, legend_classes
+            )
+            metrics = compute_landscape_metrics(
+                class_stats, raster.data, valid_mask, raster.pixel_area_m2
+            )
+            results.append({
+                "point_label": label,
+                "class_stats": class_stats,
+                "landscape_metrics": metrics,
+                "geometry_area_m2": aoi.area_m2,
+            })
+        return results
+
+    def _run_aoi_comparison(self, areas: list[tuple[str, AOI]]) -> None:
+        legend_key = self._source_selector.get_legend_key()
+        source = self._source_selector.selected_source
+        if self._source_selector.is_remote:
+            if not source:
+                QMessageBox.warning(self, "Error", "Nenhuma fonte remota selecionada.")
+                return
+            year = self._source_selector.selected_year
+            if year is None:
+                QMessageBox.warning(self, "Error", "Selecione o ano da fonte remota.")
+                return
+            try:
+                validate_year(source["key"], year)
+            except ValueError as exc:
+                QMessageBox.warning(self, "Error", str(exc))
+                return
+        elif self._source_selector.selected_file:
+            year = None
+        else:
+            QMessageBox.warning(self, "Error", "Selecione um raster local ou fonte remota.")
+            return
+
+        resolved_areas = []
+        try:
+            for label, aoi in areas:
+                if self._source_selector.is_remote:
+                    lat, lon = aoi.centroid_wgs84
+                    source_path = resolve_remote_url(
+                        source["key"], lat, lon, year=year
+                    )
+                else:
+                    source_path = self._source_selector.selected_file
+                resolved_areas.append((label, aoi, source_path))
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", str(exc))
+            return
+
+        self._status_bar.showMessage(t("status.analyzing"))
+        self._start_background_task(
+            lambda: self._compute_aoi_comparison(resolved_areas, legend_key),
+            self._on_aoi_comparison_done,
+        )
+
+    def _on_aoi_comparison_done(self, result) -> None:
+        if isinstance(result, Exception):
+            self._status_bar.showMessage(t("status.error", msg=str(result)))
+            QMessageBox.critical(self, "Error", str(result))
+            return
+        self._aoi_compare_results.update_aoi_comparison(result)
+        # Reuse the comparison export/map pipeline while retaining the exact
+        # polygon area in each result record.
+        self._last_compare = result
+        areas = self._aoi_compare_panel.areas
+        exact_areas = [
+            {"label": result[index]["point_label"], "aoi": area}
+            for index, (_, area) in enumerate(areas)
+            if index < len(result)
+        ]
+        if exact_areas:
+            self._compare_map_viewer.show_compare_aois(exact_areas)
+        self._status_bar.showMessage(t("status.done"))
+
+    @staticmethod
+    def _compute_comparison(source_path: str, legend_key: str, points: list[tuple]) -> tuple[list[dict], list[dict]]:
+        legend_classes = load_legend_classes(legend_key)
+        results: list[dict] = []
+        map_points: list[dict] = []
+        for i, (label, lat, lon, radius) in enumerate(points):
+            raster = clip_raster_to_buffer(source_path, lon, lat, radius)
+            valid_mask = raster.valid_mask_for_legend(legend_classes)
+            cs = compute_class_statistics(
+                raster.data, valid_mask, raster.pixel_area_m2, legend_classes
+            )
+            lm = compute_landscape_metrics(
+                cs, raster.data, valid_mask, raster.pixel_area_m2
+            )
+            results.append({
+                "point_label": label,
+                "class_stats": cs,
+                "landscape_metrics": lm,
+            })
+            map_points.append({
+                "label": label, "lat": lat, "lon": lon, "radius_m": radius,
+            })
+        return results, map_points
+
+    @staticmethod
+    def _compute_comparison_sources(
+        entries: list[tuple[str, float, float, float, str]], legend_key: str,
+    ) -> tuple[list[dict], list[dict]]:
+        legend_classes = load_legend_classes(legend_key)
+        results, map_points = [], []
+        for label, lat, lon, radius, source_path in entries:
+            raster = clip_raster_to_buffer(source_path, lon, lat, radius)
+            valid_mask = raster.valid_mask_for_legend(legend_classes)
+            class_stats = compute_class_statistics(
+                raster.data, valid_mask, raster.pixel_area_m2, legend_classes
+            )
+            metrics = compute_landscape_metrics(
+                class_stats, raster.data, valid_mask, raster.pixel_area_m2
+            )
+            results.append({
+                "point_label": label,
+                "class_stats": class_stats,
+                "landscape_metrics": metrics,
+            })
+            map_points.append({"label": label, "lat": lat, "lon": lon, "radius_m": radius})
+        return results, map_points
+
+    def _on_comparison_done(self, result) -> None:
+        if isinstance(result, Exception):
+            self._status_bar.showMessage(t("status.error", msg=str(result)))
+            QMessageBox.critical(self, "Error", str(result))
+            return
+        results, map_points = result
+        self._last_compare = results
+        self._compare_panel.update_results(results)
+        self._compare_map_viewer.show_compare_points(map_points)
+        self._status_bar.showMessage(t("status.done"))
 
     def _run_comparison(self, points: list) -> None:
         """points: list[ComparePoint] with .name .lat .lon .radius"""
         source_path = self._source_selector.selected_file
         legend_key = self._source_selector.get_legend_key()
+        source = self._source_selector.selected_source
 
-        if not source_path:
-            QMessageBox.warning(self, "Error", "Select a local file first.")
+        if not source_path and not self._source_selector.is_remote:
+            QMessageBox.warning(self, "Error", "Selecione um raster local ou fonte remota.")
             return
 
-        try:
-            self._status_bar.showMessage(t("status.analyzing"))
-            legend_classes = load_legend_classes(legend_key)
-            results = []
-
-            for i, p in enumerate(points):
-                # Back-compat: accept raw tuples (lat, lon, radius) too
-                if isinstance(p, tuple):
-                    lat, lon, radius = p
-                    label = f"P{i+1}"
-                else:
-                    lat, lon, radius = p.lat, p.lon, p.radius
-                    label = p.name
-
-                raster = clip_raster_to_buffer(source_path, lon, lat, radius)
-                cs = compute_class_statistics(
-                    raster.data, raster.valid_mask,
-                    raster.pixel_area_m2, legend_classes
-                )
-                lm = compute_landscape_metrics(
-                    cs, raster.data, raster.valid_mask, raster.pixel_area_m2
-                )
-                results.append({
-                    "point_label": label,
-                    "class_stats": cs,
-                    "landscape_metrics": lm,
-                })
-
-            self._last_compare = results
-            self._compare_panel.update_results(results)
-
-            # Update compare map tab
-            map_points = []
-            for i, p in enumerate(points):
-                if isinstance(p, tuple):
-                    lat_p, lon_p, radius_p = p
-                    lbl = f"P{i+1}"
-                else:
-                    lat_p, lon_p, radius_p = p.lat, p.lon, p.radius
-                    lbl = p.name
-                map_points.append({"label": lbl, "lat": lat_p, "lon": lon_p, "radius_m": radius_p})
-            grad_vals = [r["landscape_metrics"].isa_index for r in results]
-            self._compare_map_viewer.show_compare_points(
-                map_points, gradient_values=grad_vals, gradient_label="ISA (%)",
-            )
-
-            self._status_bar.showMessage(t("status.done"))
-
-        except Exception as exc:
-            self._status_bar.showMessage(t("status.error", msg=str(exc)))
-            QMessageBox.critical(self, "Error", str(exc))
-
+        normalized_points = []
+        for i, point in enumerate(points):
+            if isinstance(point, tuple):
+                lat, lon, radius = point
+                label = f"P{i + 1}"
+            else:
+                lat, lon, radius = point.lat, point.lon, point.radius
+                label = point.name
+            normalized_points.append((label, float(lat), float(lon), float(radius)))
+        if self._source_selector.is_remote:
+            year = self._source_selector.selected_year
+            if source is None or year is None:
+                QMessageBox.warning(self, "Error", "Selecione a fonte e o ano.")
+                return
+            try:
+                validate_year(source["key"], year)
+                entries = [
+                    (*point, resolve_remote_url(source["key"], point[1], point[2], year=year))
+                    for point in normalized_points
+                ]
+            except Exception as exc:
+                QMessageBox.critical(self, "Error", str(exc))
+                return
+            task = lambda: self._compute_comparison_sources(entries, legend_key)
+        else:
+            task = lambda: self._compute_comparison(source_path, legend_key, normalized_points)
+        self._status_bar.showMessage(t("status.analyzing"))
+        self._start_background_task(task, self._on_comparison_done)
     # ── Exports ───────────────────────────────────────────────────────────
 
     def _export_csv(self) -> None:
@@ -719,8 +1176,42 @@ class MainWindow(QMainWindow):
 
         self._status_bar.showMessage(f"Excel exported to {path}")
 
+    def _export_comparison_json(self) -> None:
+        import json
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export JSON", "luma_comparison.json", "JSON (*.json)"
+        )
+        if not path:
+            return
+        payload = []
+        for item in self._last_compare or []:
+            payload.append({
+                "label": item.get("point_label", ""),
+                "geometry_area_m2": item.get("geometry_area_m2"),
+                "classes": [
+                    {
+                        "id": stat.class_id,
+                        "name": stat.class_name,
+                        "pixels": stat.pixel_count,
+                        "area_m2": stat.area_m2,
+                        "percentage": stat.percentage,
+                    }
+                    for stat in item.get("class_stats", [])
+                ],
+                "landscape_metrics": {
+                    "total_patches": item["landscape_metrics"].total_patches,
+                    "shannon_diversity": item["landscape_metrics"].shannon_diversity,
+                    "largest_patch_index": item["landscape_metrics"].largest_patch_index,
+                },
+            })
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump({"comparison": payload}, handle, ensure_ascii=False, indent=2)
+        self._status_bar.showMessage(f"JSON exported to {path}")
+
     def _export_json(self) -> None:
         if not self._last_result:
+            if self._last_compare:
+                self._export_comparison_json()
             return
         import json
         path, _ = QFileDialog.getSaveFileName(
@@ -730,7 +1221,7 @@ class MainWindow(QMainWindow):
             return
         result = self._last_result
         data = {
-            "parameters": self._last_params,
+            "parameters": serializable_parameters(self._last_params),
             "total_area_m2": result.total_area_m2,
             "total_pixels": result.total_valid_pixels,
             "source": result.source_name,
@@ -809,107 +1300,6 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"PDF export failed:\n{exc}")
 
-    def _on_compare_open_map(self, points: list) -> None:
-        map_points = []
-        for i, p in enumerate(points):
-            map_points.append({"label": p.name, "lat": p.lat, "lon": p.lon, "radius_m": p.radius})
-        self._compare_map_viewer.show_compare_points(map_points)
-        self._tabs.setCurrentIndex(3)
-
-    def _on_compare_bulk_download(self, target_dir: str) -> None:
-        """Export points + buffers + map to .kmz/.kml/.shp/.tiff bundle."""
-        if not self._last_compare:
-            QMessageBox.warning(self, "", t("compare_extra.bulk_download_no_data"))
-            return
-        try:
-            from pathlib import Path as _P
-            import zipfile
-            from luma.core.buffer import buffer_geojson
-            base = _P(target_dir)
-            base.mkdir(parents=True, exist_ok=True)
-
-            # Recover the original ComparePoint geometry from compare results.
-            # _last_compare only has labels + stats; pull lat/lon from compare panel state.
-            # The compare panel rebuilds points via _collect_points; ask it instead.
-            try:
-                pts = self._compare_panel._collect_points()
-            except Exception:
-                pts = []
-
-            # KML + KMZ via simplekml
-            import simplekml
-            kml = simplekml.Kml()
-            for p in pts:
-                pnt = kml.newpoint(name=p.name, coords=[(p.lon, p.lat)])
-                pnt.style.iconstyle.color = simplekml.Color.red
-                gj = buffer_geojson(p.lon, p.lat, p.radius)
-                coords = gj["coordinates"][0]
-                pol = kml.newpolygon(
-                    name=f"{p.name} buffer",
-                    outerboundaryis=[(x, y) for x, y in coords],
-                )
-                pol.style.linestyle.color = simplekml.Color.red
-                pol.style.polystyle.color = simplekml.Color.changealphaint(60, simplekml.Color.red)
-            kml_path = base / "points_buffers.kml"
-            kmz_path = base / "points_buffers.kmz"
-            kml.save(str(kml_path))
-            kml.savekmz(str(kmz_path))
-
-            # Shapefile via pyshp — write points + buffer polygons (two shapefiles)
-            import shapefile as _shp
-            pts_w = _shp.Writer(str(base / "points"), shapeType=_shp.POINT)
-            pts_w.field("name", "C", size=64)
-            pts_w.field("lat", "F", decimal=6)
-            pts_w.field("lon", "F", decimal=6)
-            pts_w.field("radius_m", "F", decimal=2)
-            for p in pts:
-                pts_w.point(p.lon, p.lat)
-                pts_w.record(p.name, p.lat, p.lon, p.radius)
-            pts_w.close()
-            with open(base / "points.prj", "w") as f:
-                f.write(
-                    'GEOGCS["WGS 84",DATUM["WGS_1984",'
-                    'SPHEROID["WGS 84",6378137,298.257223563]],'
-                    'PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]'
-                )
-
-            buf_w = _shp.Writer(str(base / "buffers"), shapeType=_shp.POLYGON)
-            buf_w.field("name", "C", size=64)
-            buf_w.field("radius_m", "F", decimal=2)
-            for p in pts:
-                gj = buffer_geojson(p.lon, p.lat, p.radius)
-                ring = [(x, y) for x, y in gj["coordinates"][0]]
-                buf_w.poly([ring])
-                buf_w.record(p.name, p.radius)
-            buf_w.close()
-            with open(base / "buffers.prj", "w") as f:
-                f.write(
-                    'GEOGCS["WGS 84",DATUM["WGS_1984",'
-                    'SPHEROID["WGS 84",6378137,298.257223563]],'
-                    'PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]'
-                )
-
-            # Map TIFF with legend
-            tiff_path = base / "compare_map.tif"
-            class_stats = self._last_compare[0]["class_stats"] if self._last_compare else None
-            self._compare_map_viewer.export_tiff_with_legend(
-                str(tiff_path), class_stats=class_stats, title=t("tabs.compare_map"),
-            )
-
-            self._status_bar.showMessage(t("compare_extra.bulk_download_done", path=str(base)))
-        except Exception as exc:
-            QMessageBox.critical(self, "Error", f"Bulk export failed:\n{exc}\n{traceback.format_exc()}")
-
-    def _on_compare_map_tiff(self, path: str) -> None:
-        class_stats = self._last_compare[0]["class_stats"] if self._last_compare else None
-        ok = self._compare_map_viewer.export_tiff_with_legend(
-            path, class_stats=class_stats, title=t("tabs.compare_map"),
-        )
-        if ok:
-            self._status_bar.showMessage(f"TIFF exported to {path}")
-        else:
-            QMessageBox.warning(self, "Error", t("menu.compare_tiff_no_map"))
-
     def _export_compare_tiff(self) -> None:
         """Save the compare map as a high-quality TIFF for publication."""
         if not self._last_compare:
@@ -955,13 +1345,85 @@ class MainWindow(QMainWindow):
         self._tip_rad.set_tip(t("tips.radius"))
 
         self._source_selector.refresh_texts()
+        self._objective_selector.refresh_texts()
+        self._aoi_widget.refresh_texts()
+        self._summary_panel.refresh_texts()
         self._results_table.refresh_texts()
         self._metrics_panel.refresh_texts()
         self._temporal_panel.refresh_texts()
         self._compare_panel.refresh_texts()
+        self._aoi_compare_panel.refresh_texts()
+        self._aoi_compare_results.refresh_texts()
+        self._btn_open_inputs.setText(t("input.parameters"))
+        self._btn_compact_results.setText(t("input.view_results"))
         self._tabs.setTabText(0, t("tabs.single"))
         self._tabs.setTabText(1, t("tabs.temporal"))
         self._tabs.setTabText(2, t("tabs.compare"))
         self._tabs.setTabText(3, t("tabs.compare_map"))
+        self._tabs.setTabText(4, t("tabs.compare_aois"))
+        self._result_tabs.setTabText(0, t("tabs.coverage"))
+        self._result_tabs.setTabText(1, t("tabs.metrics"))
         self._status_bar.showMessage(t("status.ready"))
         self._setup_menu()
+
+    def _save_project(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, t("menu.save_project"), "luma_project.luma.json",
+            "LUMA Project (*.luma.json);;JSON (*.json)",
+        )
+        if not path:
+            return
+        source = self._source_selector.selected_source
+        params = {
+            "lat": self._lat_input.value(),
+            "lon": self._lon_input.value(),
+            "radius_m": self._radius_input.value(),
+            "aoi": self._aoi,
+            "source_file": self._source_selector.selected_file,
+        }
+        payload = build_project(
+            params,
+            source_key=source.get("key") if source else None,
+            source_year=self._source_selector.selected_year,
+            legend_key=self._source_selector.get_legend_key(),
+        )
+        try:
+            save_project(path, payload)
+        except OSError as exc:
+            QMessageBox.critical(self, "Error", str(exc))
+            return
+        self._status_bar.showMessage(f"Projeto salvo em {path}")
+
+    def _open_project(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, t("menu.open_project"), "",
+            "LUMA Project (*.luma.json);;JSON (*.json)",
+        )
+        if not path:
+            return
+        try:
+            payload = load_project(path)
+            params = payload["parameters"]
+            source = payload["source"]
+            self._lat_input.setValue(float(params.get("lat", self._lat_input.value())))
+            self._lon_input.setValue(float(params.get("lon", self._lon_input.value())))
+            self._radius_input.setValue(float(params.get("radius_m", self._radius_input.value())))
+            aoi_payload = params.get("aoi")
+            if aoi_payload:
+                aoi = AOI.from_geojson(
+                    aoi_payload["geometry"], crs=aoi_payload.get("crs")
+                )
+                self._aoi_widget.set_aoi(aoi)
+            else:
+                self._aoi_widget.set_aoi(None)
+            self._source_selector.apply_project(
+                source_key=source.get("key"),
+                source_year=source.get("year"),
+                legend_key=source.get("legend"),
+                source_file=params.get("source_file"),
+            )
+            self._last_params = dict(params)
+        except (ValueError, KeyError, TypeError) as exc:
+            QMessageBox.critical(self, "Error", str(exc))
+            return
+        self._status_bar.showMessage(f"Projeto aberto: {path}")

@@ -1,7 +1,7 @@
-# MapBiomas Collection 10 — Brazilian Land Use/Land Cover Legend
-# Source: https://brasil.mapbiomas.org  (Codigos-da-legenda-colecao-10.csv)
-name: "MapBiomas Collection 10"
-description: "Annual land use/cover mapping of Brazil at 30m resolution (Landsat) — Collection 10"
+# MapBiomas Collection 10.1 — Brazilian Land Use/Land Cover Legend
+# Source: https://brasil.mapbiomas.org (legend shared by Collection 10.1)
+name: "MapBiomas Collection 10.1"
+description: "Annual land use/cover mapping of Brazil at 30m resolution (Landsat) — Collection 10.1"
 resolution: "30m"
 reported_accuracy: "90.0%"
 coverage: "Brazil — Amazon, Atlantic Forest, Cerrado, Caatinga, Pampa, Pantanal"

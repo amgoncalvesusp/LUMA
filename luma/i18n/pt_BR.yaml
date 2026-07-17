@@ -3,9 +3,14 @@ app:
   title: "LUMA - Analisador de Uso e Cobertura do Solo"
   subtitle: "Análise LULC baseada em raster com zonas de buffer"
 
+common:
+  click_for_more: "Clique para ver mais"
+
 menu:
   file: "Arquivo"
   settings: "Configurações"
+  view: "Exibir"
+  input_panel: "Painel de parâmetros"
   help: "Ajuda"
   about: "Sobre"
   exit: "Sair"
@@ -15,6 +20,8 @@ menu:
   export_xlsx: "Exportar Excel (.xlsx)"
   export_json: "Exportar JSON"
   export_pdf: "Exportar Relatório PDF"
+  save_project: "Salvar Projeto LUMA"
+  open_project: "Abrir Projeto LUMA"
   export_compare_tiff: "Exportar Mapa Comparativo como TIFF"
   compare_tiff_no_data: "Execute a análise comparativa primeiro."
   compare_tiff_no_map: "Mapa não disponível. Aguarde a análise comparativa ser concluída."
@@ -37,6 +44,8 @@ input:
   legend_close: "Fechar"
   year: "Ano"
   analyze: "Analisar"
+  parameters: "Parâmetros"
+  view_results: "Ver resultados"
   clear: "Limpar"
   add_point: "Adicionar Ponto"
   remove_point: "Remover Ponto"
@@ -44,13 +53,36 @@ input:
   open_download_page: "Abrir Pagina de Download"
 
 tabs:
-  single: "Análise Simples"
-  compare: "Comparar Pontos"
-  temporal: "Análise Temporal"
-  compare_map: "Mapa Comparativo"
+  single: "Análise"
+  compare: "Pontos"
+  temporal: "Temporal"
+  compare_map: "Mapa"
+  compare_aois: "Áreas"
+  coverage: "Cobertura"
+  metrics: "Métricas"
+
+objective:
+  title: "O que você quer investigar?"
+  hint: "Escolha a pergunta de pesquisa; o LUMA abrirá o fluxo correspondente."
+  single: "Descrever a cobertura em um local"
+  temporal: "Entender mudanças entre anos"
+  compare: "Comparar vários locais"
+  compare_aois: "Comparar áreas poligonais"
+
+aoi_compare:
+  title: "Comparar áreas poligonais"
+  instruction: "Desenhe ou importe uma área e adicione pelo menos duas."
+  add: "Adicionar área"
+  remove: "Remover selecionada"
+  analyze: "Analisar áreas"
+  area: "Área"
+  dominant: "Classe dominante"
+  area_km2: "Área (km²)"
+  patches: "Fragmentos"
 
 results:
   title: "Resultados"
+  empty: "Os resultados aparecerão aqui após a análise. Configure a área e a fonte de dados no painel de parâmetros."
   category: "Categoria"
   pixels: "Pixels"
   area_km2: "Área (km²)"
@@ -61,6 +93,14 @@ results:
   total_area: "Área Total"
   source_label: "Fonte"
   accuracy_label: "Acurácia Reportada"
+
+summary:
+  title: "Resumo Acadêmico"
+  dominant: "Classe predominante: {name} ({percentage})"
+  impervious_proxy: "Proxy de superfície impermeável (classes construídas): {percentage}"
+  patches: "Fragmentos de paisagem mapeados: {n}"
+  source: "Dataset: {source}"
+  no_data: "Nenhuma classe válida foi encontrada para esta área."
 
 metrics:
   title: "Métricas de Paisagem"
@@ -181,6 +221,19 @@ tips:
   transition_matrix: "A Matriz de Transição mostra como a cobertura do solo mudou entre duas datas.\n\nLinhas = classe no tempo 1, Colunas = classe no tempo 2.\nValores na diagonal = área que permaneceu inalterada (persistência).\nFora da diagonal = área que transitou de uma classe para outra."
   fao_rate: "Taxa Anual de Desmatamento FAO: r = 1 - (A₂/A₁)^(1/(t₂-t₁))\n\nA métrica padrão usada pela Organização das Nações Unidas para Alimentação e Agricultura para quantificar a perda anual de floresta.\n\nInterpretação:\n• 0% = Sem mudança\n• Positivo = Perda de floresta\n• Negativo = Ganho de floresta (reflorestamento)"
 
+aoi:
+  draw: "Desenhar polígono"
+  finish: "Concluir"
+  import: "Importar AOI..."
+  clear: "Limpar"
+  none: "Nenhuma área selecionada"
+  add_vertices: "Clique em 'Desenhar' e adicione os vértices"
+  vertex_instruction: "Clique no mapa para adicionar ao menos três vértices."
+  vertex_count: "{n} vértice(s) adicionado(s)"
+  invalid_vertices: "Um polígono precisa de pelo menos três vértices."
+  selected_area: "Área selecionada: {area:,.2f} ha"
+  import_dialog: "Importar área de interesse"
+
 report:
   title: "Relatório de Análise de Uso e Cobertura do Solo"
   generated_by: "Gerado pelo LUMA v{version}"
@@ -191,6 +244,12 @@ report:
   buffer_radius: "Raio do Buffer"
   buffer_area: "Área do Buffer"
   data_source: "Fonte de Dados"
+  geometry: "Geometria"
+  polygon: "Polígono"
+  geometry_area: "Área da Geometria"
+  collection: "Coleção"
+  year: "Ano"
+  crs: "CRS"
   resolution: "Resolução"
   accuracy: "Acurácia Reportada"
   results_section: "Distribuição da Cobertura do Solo"
@@ -207,6 +266,7 @@ report:
   compare_section: "Comparação Multi-Ponto"
   compare_class_pct: "Distribuição de Classes (%)"
   compare_metrics: "Métricas de Paisagem por Ponto"
+  compare_area: "Área (km²)"
   metric_detail_title: "Descrição das Métricas e Base de Cálculo"
   metric_detail_shannon: "<b>Índice de Diversidade de Shannon (SHDI)</b><br/>Fórmula: SHDI = −Σ(pᵢ × ln pᵢ), onde pᵢ é a proporção da paisagem ocupada pela classe i.<br/>Amplitude: 0 (classe única) a ln(n) (diversidade máxima com n classes).<br/>Interpretação: Valores acima de 1,5 indicam alta heterogeneidade da paisagem. Útil para comparar complexidade da paisagem entre diferentes locais ou períodos.<br/>Referência: Shannon, C.E. (1948). A Mathematical Theory of Communication. <i>Bell System Technical Journal</i>, 27, 379–423."
   metric_detail_simpson: "<b>Índice de Diversidade de Simpson (SIDI)</b><br/>Fórmula: SIDI = 1 − Σ(pᵢ²), onde pᵢ é a proporção da paisagem ocupada pela classe i.<br/>Amplitude: 0 (classe única) a 1 − 1/n (diversidade máxima).<br/>Interpretação: Representa a probabilidade de dois pixels selecionados aleatoriamente pertencerem a classes diferentes. Menos sensível a classes raras que Shannon. Valores acima de 0,7 indicam alta diversidade.<br/>Referência: Simpson, E.H. (1949). Measurement of Diversity. <i>Nature</i>, 163, 688."
@@ -253,36 +313,3 @@ download:
   complete: "Download concluído"
   cached: "Usando dados em cache"
   error: "Falha no download: {msg}"
-
-ui:
-  chart_type: "Tipo de gráfico"
-  chart_bar: "Barra"
-  chart_line: "Linha"
-  show_maps: "Mostrar mapas"
-  hide_maps: "Ocultar mapas"
-  map_cap_note: "Limite de 10 mapas: mostrando apenas o mais antigo e o mais recente."
-  epsg_label: "EPSG: {code} (UTM)"
-  scroll_results: "Rolar resultados"
-
-legend_table:
-  caption: "Legenda das métricas"
-  desc_pixels: "Pixels: número de células do raster classificadas nesta classe dentro do buffer."
-  desc_area_km2: "Área (km²): área total ocupada por esta classe."
-  desc_area_ha: "Área (ha): mesma área expressa em hectares (1 ha = 0,01 km²)."
-  desc_percentage: "Porcentagem: fração da área válida do buffer ocupada por esta classe."
-  desc_num_patches: "Fragmentos: número de manchas espacialmente contíguas desta classe."
-  desc_largest_patch: "Maior fragmento: área (m²) da maior mancha contígua desta classe."
-
-compare_extra:
-  preview_title: "Pontos selecionados"
-  preview_count: "{n} pontos prontos para processar"
-  preview_btn: "Pré-visualizar pontos"
-  gradient_title: "Gradiente entre pontos"
-  gradient_metric: "Métrica"
-  show_map_btn: "Abrir mapa com todos os pontos"
-  bulk_download_btn: "Baixar pacote (KMZ / KML / SHP / TIFF)"
-  bulk_download_dir: "Selecionar pasta para o pacote"
-  bulk_download_done: "Pacote exportado em {path}"
-  bulk_download_no_data: "Execute a comparação antes de exportar."
-  map_tiff_btn: "Exportar mapa como TIFF (com legenda)"
-  splitter_hint: "Arraste as bordas para redimensionar os painéis."

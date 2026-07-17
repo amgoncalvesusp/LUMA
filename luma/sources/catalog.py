@@ -69,19 +69,31 @@ def list_sources() -> list[dict]:
             "key": key,
             "name": src.get("display_name", key),
             "legend": src["legend"],
-            "resolution": legend_info.get("resolution", "Unknown"),
-            "coverage": legend_info.get("coverage", "Unknown"),
-            "accuracy": legend_info.get("reported_accuracy", "Unknown"),
-            "temporal_range": legend_info.get("temporal_range", "Unknown"),
+            # Source-level values take precedence over legend defaults.  This
+            # matters for MapBiomas 10 m, which shares class IDs with the
+            # 30 m legend but has a different spatial resolution and series.
+            "resolution": src.get("resolution", legend_info.get("resolution", "Unknown")),
+            "resolution_m": src.get("resolution_m"),
+            "coverage": src.get("coverage", legend_info.get("coverage", "Unknown")),
+            "accuracy": src.get("reported_accuracy", legend_info.get("reported_accuracy", "Unknown")),
+            "temporal_range": src.get("temporal_range", legend_info.get("temporal_range", "Unknown")),
             "url_template": src.get("url_template", ""),
             "download_url": src.get("download_url", ""),
             "download_instructions": src.get("download_instructions", ""),
             "type": src.get("type", "local"),
+            "provider": src.get("provider"),
+            "collection": src.get("collection"),
+            "gee_asset": src.get("gee_asset"),
+            "asset_id": src.get("asset_id", src.get("gee_asset")),
+            "years_range": src.get("years_range"),
+            "compatibility": src.get("compatibility", {}),
         })
     return result
 
 
-def resolve_remote_url(source_key: str, lat: float, lon: float) -> str:
+def resolve_remote_url(
+    source_key: str, lat: float, lon: float, year: int | None = None
+) -> str:
     """Resolve a remote COG URL for the given coordinates.
 
     Handles tile grid calculation for ESA WorldCover-style URLs.
@@ -107,7 +119,55 @@ def resolve_remote_url(source_key: str, lat: float, lon: float) -> str:
         return url_template.format(lat_tile=lat_tile, lon_tile=lon_tile)
 
     # Fallback: try simple substitution
-    return url_template.format(lat=lat, lon=lon)
+    if year is None:
+        years = src.get("years_range") or src.get("years") or []
+        year = years[-1] if years else None
+
+    return url_template.format(lat=lat, lon=lon, year=year)
+
+
+def validate_year(source_key: str, year: int) -> bool:
+    """Validate that *year* belongs to a source's declared temporal range.
+
+    A ``ValueError`` is raised instead of silently falling back to a nearby
+    year, because temporal analyses must remain reproducible.
+    """
+    src = get_source(source_key)
+    years = src.get("years_range")
+    if years:
+        first, last = int(years[0]), int(years[1])
+        if not first <= int(year) <= last:
+            raise ValueError(
+                f"Year {year} is outside the supported range {first}-{last} "
+                f"for source '{source_key}'."
+            )
+    elif src.get("years") and int(year) not in {int(item) for item in src["years"]}:
+        raise ValueError(
+            f"Year {year} is not available for source '{source_key}'."
+        )
+    return True
+
+
+def validate_source_compatibility(source_a: str, source_b: str) -> bool:
+    """Ensure two sources can be compared in a temporal analysis.
+
+    Temporal comparisons are only valid for the same provider, product,
+    collection and pixel size.  Local/legacy sources without these metadata
+    remain compatible with themselves for backwards compatibility.
+    """
+    first, second = get_source(source_a), get_source(source_b)
+    fields = ("provider", "product", "collection", "resolution_m")
+    mismatches = [
+        field for field in fields
+        if (first.get(field) is not None or second.get(field) is not None)
+        and first.get(field) != second.get(field)
+    ]
+    if mismatches:
+        raise ValueError(
+            "Sources are not temporally compatible; differing metadata: "
+            + ", ".join(mismatches)
+        )
+    return True
 
 
 def list_legends() -> list[dict]:

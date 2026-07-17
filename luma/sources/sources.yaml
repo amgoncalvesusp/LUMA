@@ -26,13 +26,81 @@ sources:
     download_url: "https://esa-worldcover.org/en/data-access"
     download_instructions: "Free access. Select region and download GeoTIFF tiles."
 
+  # Recommended historical MapBiomas product for Brazil.  The public GCS
+  # links are Cloud Optimized GeoTIFFs (one full-country file per year).  The
+  # GEE asset is included for reproducible workflows and citation.
+  mapbiomas_brazil_col10_1:
+    display_name: "MapBiomas Brazil — Collection 10.1 (30 m, 1985–2024)"
+    provider: "mapbiomas"
+    product: "land_cover"
+    collection: "10.1"
+    legend: "mapbiomas_col10"
+    type: "remote_cog"
+    resolution: "30m"
+    resolution_m: 30
+    coverage: "Brazil"
+    years_range: [1985, 2024]
+    temporal_range: "1985-2024"
+    reported_accuracy: "See MapBiomas Collection 10.1 accuracy assessment"
+    gee_asset: "projects/mapbiomas-public/assets/brazil/lulc/collection10_1/mapbiomas_brazil_collection10_1_coverage_v1"
+    asset_id: "projects/mapbiomas-public/assets/brazil/lulc/collection10_1/mapbiomas_brazil_collection10_1_coverage_v1"
+    asset_type: "ee.Image"
+    url_template: "https://storage.googleapis.com/mapbiomas-public/initiatives/brasil/collection_10/lulc/coverage/brazil_coverage_{year}.tif"
+    download_url: "https://brasil.mapbiomas.org/en/colecoes-mapbiomas/"
+    catalog_url: "https://brasil.mapbiomas.org/en/colecoes-mapbiomas/"
+    download_instructions: "Choose a year and download the GeoTIFF from the MapBiomas platform, or let LUMA fetch the public COG for the selected year."
+    compatibility:
+      temporal_comparison: "same_collection_and_resolution_only"
+      comparable_collection: "10.1"
+
+  # 10 m beta product.  It is intentionally separate from the historical
+  # product: it covers only 2017–2024 and must not be mixed with 30 m pixels.
+  mapbiomas_brazil_col3_10m:
+    display_name: "MapBiomas Brazil — Collection 3 beta (10 m, 2017–2024)"
+    provider: "mapbiomas"
+    product: "land_cover"
+    collection: "3 beta"
+    legend: "mapbiomas_col10"
+    type: "remote_cog"
+    resolution: "10m"
+    resolution_m: 10
+    coverage: "Brazil"
+    years_range: [2017, 2024]
+    temporal_range: "2017-2024"
+    reported_accuracy: "Beta product; consult the MapBiomas 10 m methodology and accuracy assessment"
+    gee_asset: "projects/mapbiomas-public/assets/brazil/lulc_10m/collection3/mapbiomas_10m_collection3_integration_v1"
+    asset_id: "projects/mapbiomas-public/assets/brazil/lulc_10m/collection3/mapbiomas_10m_collection3_integration_v1"
+    asset_type: "ee.Image"
+    url_template: "https://storage.googleapis.com/mapbiomas-public/initiatives/brasil/lulc_10m/collection_3/brazil_lulc_10m_{year}.tif"
+    download_url: "https://brasil.mapbiomas.org/en/colecoes-mapbiomas/"
+    catalog_url: "https://brasil.mapbiomas.org/en/colecoes-mapbiomas/"
+    download_instructions: "Beta 10 m maps are available for 2017–2024. Select a year in the MapBiomas platform or use LUMA's public COG link."
+    compatibility:
+      temporal_comparison: "same_collection_and_resolution_only"
+      comparable_collection: "3 beta"
+
+  # Backwards-compatible key used by existing saved projects.  New projects
+  # should select mapbiomas_brazil_col10_1 explicitly.
   mapbiomas_brazil_col10:
-    display_name: "MapBiomas Brazil (Collection 10)"
+    display_name: "MapBiomas Brazil (Collection 10.1 — legacy key)"
+    provider: "mapbiomas"
+    product: "land_cover"
+    collection: "10.1"
     legend: "mapbiomas_col10"
     type: "local"
+    resolution: "30m"
+    resolution_m: 30
+    coverage: "Brazil"
     years_range: [1985, 2024]
+    temporal_range: "1985-2024"
+    gee_asset: "projects/mapbiomas-public/assets/brazil/lulc/collection10_1/mapbiomas_brazil_collection10_1_coverage_v1"
+    asset_id: "projects/mapbiomas-public/assets/brazil/lulc/collection10_1/mapbiomas_brazil_collection10_1_coverage_v1"
+    asset_type: "ee.Image"
     download_url: "https://brasil.mapbiomas.org/en/colecoes-mapbiomas/"
-    download_instructions: "Select 'Coverage' > Choose year > Download GeoTIFF for your state/biome. Free registration required."
+    download_instructions: "Legacy local-file workflow. Download the selected year from MapBiomas and choose the GeoTIFF in LUMA."
+    compatibility:
+      temporal_comparison: "same_collection_and_resolution_only"
+      comparable_collection: "10.1"
 
   mapbiomas_brazil:
     display_name: "MapBiomas Brazil (Collection 9)"

@@ -3,7 +3,15 @@
 from __future__ import annotations
 
 import json
+import base64
+import html
+import io
 
+import numpy as np
+from PIL import Image, ImageColor
+from rasterio.transform import array_bounds
+from rasterio.warp import transform_bounds
+from pyproj import CRS
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 from PySide6.QtCore import QUrl, Qt
 
@@ -74,6 +82,36 @@ class MapViewer(QWidget):
         html = self._build_map_html(lat, lon, zoom, radius_m, geojson_buffer)
         self._load_html(html)
 
+    def show_aoi(
+        self,
+        aoi_or_geojson,
+        *,
+        center: tuple[float, float] | None = None,
+        zoom: int = 12,
+    ) -> None:
+        """Display a polygonal AOI on the map.
+
+        The method accepts an ``AOI`` instance or a WGS-84 GeoJSON geometry,
+        allowing the drawing widget to be integrated without changing the
+        existing buffer/results methods.
+        """
+        if not self._ensure_web() or aoi_or_geojson is None:
+            return
+        if hasattr(aoi_or_geojson, "to_geojson"):
+            geojson = aoi_or_geojson.to_geojson()
+            if center is None and hasattr(aoi_or_geojson, "centroid_wgs84"):
+                center = aoi_or_geojson.centroid_wgs84
+        else:
+            geojson = aoi_or_geojson
+        if center is None:
+            from shapely.geometry import shape
+
+            centroid = shape(geojson).centroid
+            center = (centroid.y, centroid.x)
+        lat, lon = center
+        html = self._build_map_html(lat, lon, zoom, geojson_buffer=geojson)
+        self._load_html(html)
+
     def show_results(
         self,
         lat: float,
@@ -81,16 +119,72 @@ class MapViewer(QWidget):
         radius_m: float,
         class_stats: list,
         geojson_buffer: dict | None = None,
+        raster_data=None,
+        raster_valid_mask=None,
+        raster_transform=None,
+        raster_crs=None,
     ) -> None:
-        """Show buffer with a legend overlay of results."""
+        """Show the analysed area with a thematic raster and legend."""
         if not self._ensure_web():
             return
         zoom = self._estimate_zoom(radius_m)
         legend_html = self._build_legend_html(class_stats)
+        if all(value is not None for value in (
+            raster_data, raster_valid_mask, raster_transform, raster_crs
+        )):
+            colors = {cs.class_id: cs.color for cs in class_stats}
+            legend_html = self._build_classified_overlay_html(
+                raster_data, raster_valid_mask, raster_transform, raster_crs,
+                colors,
+            ) + legend_html
         html = self._build_map_html(
             lat, lon, zoom, radius_m, geojson_buffer, legend_html
         )
         self._load_html(html)
+
+    @staticmethod
+    def _build_classified_overlay_html(
+        data: np.ndarray,
+        valid_mask: np.ndarray,
+        transform,
+        crs,
+        colors: dict[int, str],
+    ) -> str:
+        """Build a transparent PNG Leaflet overlay from a classified raster."""
+        if data.ndim != 2 or valid_mask.shape != data.shape:
+            raise ValueError("Raster data and valid mask must be matching 2-D arrays")
+        rgba = np.zeros((*data.shape, 4), dtype=np.uint8)
+        for class_id, color in colors.items():
+            try:
+                rgb = ImageColor.getrgb(str(color))
+            except ValueError:
+                rgb = (128, 128, 128)
+            class_mask = (data == class_id) & valid_mask
+            rgba[class_mask, 0] = rgb[0]
+            rgba[class_mask, 1] = rgb[1]
+            rgba[class_mask, 2] = rgb[2]
+            rgba[class_mask, 3] = 190
+
+        image = Image.fromarray(rgba, mode="RGBA")
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG", optimize=True)
+        encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
+
+        height, width = data.shape
+        west, south, east, north = array_bounds(height, width, transform)
+        source_crs = CRS.from_user_input(crs)
+        if not source_crs.is_geographic:
+            west, south, east, north = transform_bounds(
+                source_crs, CRS.from_epsg(4326), west, south, east, north,
+                densify_pts=21,
+            )
+        bounds = json.dumps([[south, west], [north, east]])
+        return (
+            "<script>"
+            f"L.imageOverlay('data:image/png;base64,{encoded}', {bounds}, "
+            "{opacity: 0.72, interactive: false}).addTo(map);"
+            "</script>"
+        )
 
     def _estimate_zoom(self, radius_m: float) -> int:
         if radius_m > 100_000:
@@ -157,18 +251,6 @@ class MapViewer(QWidget):
             L.marker([{lat}, {lon}]).addTo(map);
             """
 
-        try:
-            from luma.core.crs_utils import optimal_utm_crs
-            epsg_code = optimal_utm_crs(lon, lat).to_epsg() if (lat or lon) else "—"
-        except Exception:
-            epsg_code = "—"
-        epsg_html = f"""
-        <div style="position:fixed;top:15px;left:60px;z-index:9999;
-             background:rgba(255,255,255,0.92);padding:4px 10px;border-radius:4px;
-             font-family:sans-serif;font-size:12px;font-weight:bold;color:#222;
-             box-shadow:0 2px 6px rgba(0,0,0,0.2);">EPSG: {epsg_code} (UTM)</div>
-        """
-
         return f"""
         <!DOCTYPE html>
         <html>
@@ -182,7 +264,6 @@ class MapViewer(QWidget):
         </head>
         <body>
             <div id="map"></div>
-            {epsg_html}
             {extra_html}
             <script>
                 var map = L.map('map').setView([{lat}, {lon}], {zoom});
@@ -208,16 +289,64 @@ class MapViewer(QWidget):
         </html>
         """
 
-    def show_compare_points(
-        self,
-        points_data: list[dict],
-        gradient_values: list[float] | None = None,
-        gradient_label: str = "",
-    ) -> None:
+    @staticmethod
+    def _build_compare_aois_html(areas: list[dict]) -> str:
+        """Build a Leaflet map using the exact WGS-84 AOI polygons."""
+        palette = [
+            "#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6",
+            "#1abc9c", "#e67e22", "#34495e", "#e91e63", "#00bcd4",
+        ]
+        features = []
+        for index, item in enumerate(areas):
+            aoi = item["aoi"]
+            features.append({
+                "type": "Feature",
+                "properties": {
+                    "label": str(item.get("label", f"Área {index + 1}")),
+                    "color": palette[index % len(palette)],
+                },
+                "geometry": aoi.to_geojson(),
+            })
+        feature_collection = json.dumps(
+            {"type": "FeatureCollection", "features": features},
+            ensure_ascii=False,
+        )
+        return f"""
+        <!DOCTYPE html>
+        <html><head><meta charset="utf-8"/>
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <style>html, body, #map {{ height: 100%; margin: 0; padding: 0; }}</style>
+        </head><body><div id="map"></div><script>
+        var map = L.map('map');
+        L.tileLayer('https://{{s}}.tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
+            attribution: '&copy; OpenStreetMap contributors', maxZoom: 19
+        }}).addTo(map);
+        var areas = {feature_collection};
+        var layer = L.geoJSON(areas, {{
+            style: function(feature) {{ return {{
+                color: feature.properties.color, weight: 3,
+                fillColor: feature.properties.color, fillOpacity: 0.22
+            }}; }},
+            onEachFeature: function(feature, layer) {{
+                layer.bindTooltip(feature.properties.label, {{sticky: true}});
+                layer.bindPopup(feature.properties.label);
+            }}
+        }}).addTo(map);
+        if (layer.getBounds().isValid()) {{ map.fitBounds(layer.getBounds(), {{padding: [20, 20]}}); }}
+        </script></body></html>
+        """
+
+    def show_compare_aois(self, areas: list[dict]) -> None:
+        """Show exact AOI polygons; each item contains ``label`` and ``aoi``."""
+        if not self._ensure_web() or not areas:
+            return
+        self._load_html(self._build_compare_aois_html(areas))
+
+    def show_compare_points(self, points_data: list[dict]) -> None:
         """Show all compared points on the map with buffers, scale bar and north arrow.
 
         Each dict must have: label, lat, lon, radius_m.
-        Optional gradient_values colors point fills by metric value.
         """
         if not self._ensure_web() or not points_data:
             return
@@ -236,25 +365,14 @@ class MapViewer(QWidget):
             "#1abc9c", "#e67e22", "#34495e", "#e91e63", "#00bcd4",
         ]
 
-        def _grad_color(v: float, vmin: float, vmax: float) -> str:
-            span = (vmax - vmin) or 1.0
-            t_ = (v - vmin) / span
-            r = int(40 + 200 * t_)
-            g = int(120 * (1 - abs(0.5 - t_) * 2))
-            b = int(220 * (1 - t_))
-            return f"rgb({r},{g},{b})"
-
-        use_grad = gradient_values is not None and len(gradient_values) == len(points_data)
-        if use_grad:
-            vmin = min(gradient_values); vmax = max(gradient_values)
-
         markers_js = ""
         for i, p in enumerate(points_data):
-            if use_grad:
-                color = _grad_color(gradient_values[i], vmin, vmax)
-            else:
-                color = palette[i % len(palette)]
-            label = p["label"].replace("'", "\\'")
+            color = palette[i % len(palette)]
+            # Labels are user supplied; escape HTML and JavaScript delimiters
+            # before embedding them in the Leaflet document.
+            label = html.escape(str(p["label"]), quote=True)
+            label = label.replace("\\", "\\\\").replace("\r", " ").replace("\n", " ")
+            label = label.replace("'", "\\'")
             markers_js += f"""
             L.circle([{p['lat']}, {p['lon']}], {{
                 radius: {p['radius_m']},
@@ -276,35 +394,6 @@ class MapViewer(QWidget):
                     iconAnchor: [0, 0]
                 }})
             }}).addTo(map).bindPopup('{label}');
-            """
-
-        # EPSG (UTM) for the centroid
-        try:
-            from luma.core.crs_utils import optimal_utm_crs
-            epsg_code = optimal_utm_crs(centre_lon, centre_lat).to_epsg()
-        except Exception:
-            epsg_code = "—"
-        epsg_html = f"""
-        <div style="position:fixed;top:15px;left:60px;z-index:9999;
-             background:rgba(255,255,255,0.92);padding:4px 10px;border-radius:4px;
-             font-family:sans-serif;font-size:12px;font-weight:bold;color:#222;
-             box-shadow:0 2px 6px rgba(0,0,0,0.2);">EPSG: {epsg_code} (UTM)</div>
-        """
-
-        gradient_legend_html = ""
-        if use_grad:
-            gradient_legend_html = f"""
-            <div style="position:fixed;bottom:30px;left:15px;z-index:9999;
-                 background:rgba(255,255,255,0.92);padding:8px 12px;border-radius:6px;
-                 font-family:sans-serif;font-size:11px;
-                 box-shadow:0 2px 6px rgba(0,0,0,0.25);">
-              <div style="font-weight:bold;margin-bottom:4px;">{gradient_label}</div>
-              <div style="width:160px;height:12px;background:linear-gradient(
-                 to right, rgb(40,0,220), rgb(140,60,110), rgb(240,0,0));"></div>
-              <div style="display:flex;justify-content:space-between;font-size:10px;">
-                <span>{vmin:.2f}</span><span>{vmax:.2f}</span>
-              </div>
-            </div>
             """
 
         north_arrow_html = """
@@ -335,8 +424,6 @@ class MapViewer(QWidget):
         <body>
             <div id="map"></div>
             {north_arrow_html}
-            {epsg_html}
-            {gradient_legend_html}
             <script>
                 var map = L.map('map').setView([{centre_lat}, {centre_lon}], {zoom});
                 var streets = L.tileLayer(
@@ -361,57 +448,6 @@ class MapViewer(QWidget):
         if self._web is None:
             return None
         return self._web.grab()
-
-    def export_tiff_with_legend(
-        self,
-        path: str,
-        class_stats: list | None = None,
-        title: str = "",
-    ) -> bool:
-        """Save the current map as TIFF with a legend strip appended below."""
-        if self._web is None:
-            return False
-        pix = self._web.grab()
-        if pix is None or pix.isNull():
-            return False
-        try:
-            from PySide6.QtCore import QBuffer, QIODevice
-            from PIL import Image, ImageDraw, ImageFont
-            from io import BytesIO
-        except Exception:
-            return pix.save(path, "TIFF")
-
-        buf = QBuffer()
-        buf.open(QIODevice.OpenModeFlag.WriteOnly)
-        pix.save(buf, "PNG")
-        map_img = Image.open(BytesIO(bytes(buf.data()))).convert("RGB")
-
-        rows = list(class_stats or [])[:16]
-        row_h = 22
-        legend_h = max(60, 40 + row_h * max(len(rows), 1))
-        out = Image.new("RGB", (map_img.width, map_img.height + legend_h), "white")
-        out.paste(map_img, (0, 0))
-        draw = ImageDraw.Draw(out)
-        try:
-            font = ImageFont.truetype("arial.ttf", 13)
-            font_b = ImageFont.truetype("arialbd.ttf", 14)
-        except Exception:
-            font = ImageFont.load_default()
-            font_b = font
-        y = map_img.height + 8
-        if title:
-            draw.text((12, y), title, fill="black", font=font_b)
-            y += 22
-        for cs in rows:
-            color = getattr(cs, "color", "#888")
-            name = getattr(cs, "class_name", str(cs))
-            pct = getattr(cs, "percentage", None)
-            draw.rectangle([12, y + 4, 28, y + 18], fill=color, outline="black")
-            txt = f"{name}" + (f"  ({pct:.1f}%)" if pct is not None else "")
-            draw.text((36, y + 2), txt, fill="black", font=font)
-            y += row_h
-        out.save(path, format="TIFF")
-        return True
 
     def _load_html(self, html: str) -> None:
         # Use setHtml with a base URL so the CDN scripts can load
