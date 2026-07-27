@@ -4,15 +4,17 @@
 
 O executavel final para teste local fica em:
 
-`dist\LUMA_ULTIMA\LUMA.exe`
+`dist\LUMA_RELEASE\LUMA.exe`
 
 Para recriar o pacote portatil:
 
 ```powershell
-& 'C:\Users\adria\AppData\Local\Schrodinger\PyMOL3\python.exe' -m PyInstaller --noconfirm --distpath C:\Users\adria\AppData\Local\GeoDudeBuild\dist --workpath C:\Users\adria\AppData\Local\GeoDudeBuild\build luma.spec
+$buildRoot = 'C:\Users\adria\AppData\Local\GeoDudeBuild'
+if (Test-Path $buildRoot) { Remove-Item $buildRoot -Recurse -Force }
+& '.venv\Scripts\python.exe' -m PyInstaller --clean --noconfirm --distpath "$buildRoot\dist" --workpath "$buildRoot\build" luma.spec
 ```
 
-Depois copie `C:\Users\adria\AppData\Local\GeoDudeBuild\dist\LUMA` para `dist\LUMA_ULTIMA`.
+Depois copie somente o resultado novo de `C:\Users\adria\AppData\Local\GeoDudeBuild\dist\LUMA` para `dist\LUMA_RELEASE`. A pasta final deve conter `LUMA.exe` e `_internal\PySide6\plugins\platforms\qwindows.dll`; não deve haver DLLs Qt ou uma pasta `plugins` ao lado de `LUMA.exe`.
 
 ## Instalador Windows
 

@@ -17,6 +17,7 @@ if getattr(sys, "frozen", False):
         os.path.join(exe_dir, "PySide6"),
     ]
     pyside_dir = next((p for p in pyside_dir_candidates if os.path.isdir(p)), "")
+    shiboken_dir = os.path.join(base, "shiboken6")
     plugin_path = os.path.join(pyside_dir, "plugins")
     platforms_path = os.path.join(plugin_path, "platforms")
 
@@ -24,7 +25,10 @@ if getattr(sys, "frozen", False):
     for key in ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH", "QT_QPA_PLATFORMTHEME"):
         os.environ.pop(key, None)
 
-    path_parts = [p for p in (pyside_dir, plugin_path, platforms_path, base, exe_dir) if p]
+    path_parts = [
+        p for p in (pyside_dir, shiboken_dir, plugin_path, platforms_path, base, exe_dir)
+        if p and os.path.isdir(p)
+    ]
     os.environ["PATH"] = os.pathsep.join(path_parts + [os.environ.get("PATH", "")])
 
     for path in path_parts:

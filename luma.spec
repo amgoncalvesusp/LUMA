@@ -4,6 +4,7 @@
 import os
 import sys
 from pathlib import Path
+from PyInstaller.building.datastruct import TOC
 
 block_cipher = None
 
@@ -105,9 +106,9 @@ a = Analysis(
     ],
     hookspath=[os.path.join(os.getcwd(), "hooks")],
     hooksconfig={},
-    # PyInstaller's built-in PySide6 runtime hook configures the bundled Qt
-    # search paths. A second PATH-mutating hook can select incompatible DLLs.
-    runtime_hooks=[],
+    # Run before PySide6 imports so the bundled Qt DLL directory wins over
+    # Qt installations inherited from QGIS, PyMOL, or Conda on PATH.
+    runtime_hooks=[os.path.join(os.getcwd(), "hooks", "pyi_rth_qt_plugins.py")],
     excludes=[
         "tkinter",
         "matplotlib.backends.backend_tkagg",
@@ -119,6 +120,17 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+# PyInstaller can discover ICU DLLs from unrelated Conda/PyMOL directories
+# inherited through PATH. Those DLLs are not part of the LUMA PySide6 wheel
+# and can shadow the Windows ICU runtime, causing Qt6Core to fail loading with
+# ``ERROR_PROC_NOT_FOUND`` before the platform plugin is initialized. Keep the
+# wheel's icudtl.dat resource, but do not bundle external ICU DLLs.
+a.binaries = TOC([
+    entry for entry in a.binaries
+    if not Path(entry[0]).name.lower().startswith("icu")
+    or not Path(entry[0]).name.lower().endswith(".dll")
+])
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 

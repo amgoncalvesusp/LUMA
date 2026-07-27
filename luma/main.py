@@ -28,12 +28,21 @@ if getattr(sys, "frozen", False):
 
     # Add PySide6 dir to DLL search path (critical for frozen builds)
     _pyside_dir = os.path.join(_base, "PySide6")
+    _shiboken_dir = os.path.join(_base, "shiboken6")
     if os.path.isdir(_pyside_dir):
         os.environ["PATH"] = (
-            _pyside_dir + os.pathsep + _base + os.pathsep + os.environ.get("PATH", "")
+            _pyside_dir
+            + os.pathsep
+            + _shiboken_dir
+            + os.pathsep
+            + _base
+            + os.pathsep
+            + os.environ.get("PATH", "")
         )
         try:
             os.add_dll_directory(_pyside_dir)
+            if os.path.isdir(_shiboken_dir):
+                os.add_dll_directory(_shiboken_dir)
             os.add_dll_directory(_base)
         except (OSError, AttributeError):
             pass
