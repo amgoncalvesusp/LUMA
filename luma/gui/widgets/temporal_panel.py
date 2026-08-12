@@ -8,13 +8,20 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QFileDialog, QSpinBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QTextEdit, QRadioButton, QButtonGroup, QStackedWidget,
-    QFrame, QScrollArea,
+    QFrame, QScrollArea, QComboBox, QSizePolicy,
 )
 from PySide6.QtCore import Signal, Qt, QSize
 from PySide6.QtGui import QColor, QBrush
 
 from luma.i18n.translator import t
 from luma.gui.widgets.help_bubble import HelpBubble
+
+try:
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _FigCanvas
+    _MPL_OK = True
+except Exception:
+    _MPL_OK = False
 
 
 # ── Helper: a single (year, file) row for multi-year mode ─────────────────────
@@ -223,9 +230,74 @@ class TemporalPanel(QGroupBox):
         self._summary.setStyleSheet("font-size: 12px;")
         layout.addWidget(self._summary)
 
+        chart_row = QHBoxLayout()
+        self._lbl_chart_type = QLabel(t("ui.chart_type") + ":")
+        self._cmb_chart_type = QComboBox()
+        self._cmb_chart_type.addItem(t("ui.chart_bar"), "bar")
+        self._cmb_chart_type.addItem(t("ui.chart_line"), "line")
+        self._cmb_chart_type.currentIndexChanged.connect(self._redraw_chart)
+        chart_row.addWidget(self._lbl_chart_type)
+        chart_row.addWidget(self._cmb_chart_type)
+        chart_row.addStretch()
+        layout.addLayout(chart_row)
+
+        self._chart_canvas = None
+        if _MPL_OK:
+            self._chart_fig = Figure(figsize=(6, 2.8), tight_layout=True)
+            self._chart_canvas = _FigCanvas(self._chart_fig)
+            self._chart_canvas.setMinimumHeight(190)
+            self._chart_canvas.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred,
+            )
+            layout.addWidget(self._chart_canvas)
+
         # Add two default year rows for series mode
         self._add_year_row()
         self._add_year_row()
+        self._last_series: list[dict] | None = None
+
+    @property
+    def chart_type(self) -> str:
+        return self._cmb_chart_type.currentData() or "bar"
+
+    def _redraw_chart(self) -> None:
+        if not _MPL_OK or self._chart_canvas is None or not self._last_series:
+            return
+        series = self._last_series
+        years = [entry["year"] for entry in series]
+        all_classes: list[str] = []
+        seen: set[str] = set()
+        for entry in series:
+            for stats in entry["class_stats"]:
+                if stats.class_name not in seen:
+                    all_classes.append(stats.class_name)
+                    seen.add(stats.class_name)
+        self._chart_fig.clear()
+        axis = self._chart_fig.add_subplot(111)
+        values = [
+            [next((stats.percentage for stats in entry["class_stats"]
+                   if stats.class_name == class_name), 0.0) for entry in series]
+            for class_name in all_classes
+        ]
+        if self.chart_type == "line":
+            for class_name, percentages in zip(all_classes, values):
+                axis.plot(years, percentages, marker="o", label=class_name)
+        else:
+            import numpy as np
+            width = 0.8 / max(len(all_classes), 1)
+            x = np.arange(len(years))
+            for index, (class_name, percentages) in enumerate(zip(all_classes, values)):
+                axis.bar(
+                    x + index * width - 0.4 + width / 2,
+                    percentages, width, label=class_name,
+                )
+            axis.set_xticks(x)
+            axis.set_xticklabels([str(year) for year in years])
+        axis.set_ylabel("%")
+        axis.set_ylim(0, 100)
+        axis.grid(axis="y", alpha=0.25)
+        axis.legend(fontsize=7, loc="best", ncol=2)
+        self._chart_canvas.draw_idle()
 
     # ── Mode handling ──────────────────────────────────────────────────────
 
@@ -378,6 +450,8 @@ class TemporalPanel(QGroupBox):
         if not series_data:
             return
 
+        self._last_series = series_data
+
         # Collect all class names (preserve order of first appearance)
         all_classes: list[str] = []
         seen: set[str] = set()
@@ -454,6 +528,7 @@ class TemporalPanel(QGroupBox):
             sign = "+" if delta >= 0 else ""
             lines.append(f"  {cls_name}: {p0:.1f}% → {p1:.1f}%  ({sign}{delta:.1f} p.p.)")
         self._summary.setPlainText("\n".join(lines))
+        self._redraw_chart()
 
     # ── i18n refresh ───────────────────────────────────────────────────────
 
@@ -469,5 +544,8 @@ class TemporalPanel(QGroupBox):
         self._tip_transition.set_tip(t("tips.transition_matrix"))
         self._btn_add_year.setText(t("temporal.add_year"))
         self._btn_analyze_series.setText(t("temporal.analyze_series"))
+        self._lbl_chart_type.setText(t("ui.chart_type") + ":")
+        self._cmb_chart_type.setItemText(0, t("ui.chart_bar"))
+        self._cmb_chart_type.setItemText(1, t("ui.chart_line"))
         for row in self._year_rows:
             row.refresh_texts()

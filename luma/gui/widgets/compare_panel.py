@@ -24,6 +24,13 @@ from PySide6.QtWidgets import (
 from luma.i18n.translator import t
 from luma.gui.widgets.coord_input import LatitudeInput, LongitudeInput, RadiusInput
 
+try:
+    from matplotlib.figure import Figure
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as _FigCanvas
+    _MPL_OK = True
+except Exception:
+    _MPL_OK = False
+
 
 # ── Data model ───────────────────────────────────────────────────────────────
 
@@ -367,6 +374,9 @@ class ComparePanel(QGroupBox):
 
     # Emits list of ComparePoint instances
     compare_requested = Signal(list)
+    open_map_requested = Signal(list)
+    bulk_download_requested = Signal(str)
+    map_tiff_requested = Signal(str)
 
     def minimumSizeHint(self) -> QSize:  # noqa: N802 - Qt API
         """Allow the form to reflow inside notebook-sized viewports."""
@@ -457,6 +467,46 @@ class ComparePanel(QGroupBox):
         radius_row.addStretch()
         root.addLayout(radius_row)
 
+        actions = QHBoxLayout()
+        self._btn_open_map = QPushButton(t("compare_extra.show_map_btn"))
+        self._btn_open_map.clicked.connect(self._on_open_map)
+        self._btn_bulk_dl = QPushButton(t("compare_extra.bulk_download_btn"))
+        self._btn_bulk_dl.clicked.connect(self._on_bulk_download)
+        self._btn_map_tiff = QPushButton(t("compare_extra.map_tiff_btn"))
+        self._btn_map_tiff.clicked.connect(self._on_map_tiff)
+        actions.addWidget(self._btn_open_map)
+        actions.addWidget(self._btn_bulk_dl)
+        actions.addWidget(self._btn_map_tiff)
+        actions.addStretch()
+        root.addLayout(actions)
+
+        chart_row = QHBoxLayout()
+        self._lbl_gradient = QLabel("<b>" + t("compare_extra.gradient_title") + "</b>")
+        self._lbl_grad_metric = QLabel(t("compare_extra.gradient_metric") + ":")
+        self._cmb_grad_metric = QComboBox()
+        self._cmb_grad_metric.addItem("ISA (%)", "isa")
+        self._cmb_grad_metric.addItem("SHDI", "shdi")
+        self._cmb_grad_metric.addItem("SIDI", "sidi")
+        self._cmb_grad_metric.addItem("LPI", "lpi")
+        self._cmb_grad_metric.addItem("Patches", "patches")
+        self._cmb_grad_metric.currentIndexChanged.connect(self._redraw_gradient)
+        chart_row.addWidget(self._lbl_gradient)
+        chart_row.addSpacing(12)
+        chart_row.addWidget(self._lbl_grad_metric)
+        chart_row.addWidget(self._cmb_grad_metric)
+        chart_row.addStretch()
+        root.addLayout(chart_row)
+
+        self._gradient_canvas = None
+        if _MPL_OK:
+            self._gradient_fig = Figure(figsize=(6, 2.6), tight_layout=True)
+            self._gradient_canvas = _FigCanvas(self._gradient_fig)
+            self._gradient_canvas.setMinimumHeight(180)
+            self._gradient_canvas.setSizePolicy(
+                QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred,
+            )
+            root.addWidget(self._gradient_canvas)
+
         # ── Compare button ─────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -514,6 +564,69 @@ class ComparePanel(QGroupBox):
         for i, r in enumerate(self._point_rows):
             r.index = i
             r.refresh_texts()
+
+    @property
+    def gradient_metric(self) -> str:
+        return self._cmb_grad_metric.currentData() or "isa"
+
+    def _on_open_map(self) -> None:
+        try:
+            points = self._collect_points()
+        except ValueError:
+            return
+        if points:
+            self.open_map_requested.emit(points)
+
+    def _on_bulk_download(self) -> None:
+        if not self._last_results:
+            QMessageBox.warning(self, "", t("compare_extra.bulk_download_no_data"))
+            return
+        path = QFileDialog.getExistingDirectory(
+            self, t("compare_extra.bulk_download_dir")
+        )
+        if path:
+            self.bulk_download_requested.emit(path)
+
+    def _on_map_tiff(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, t("compare_extra.map_tiff_btn"), "luma_compare_map.tif",
+            "TIFF (*.tif *.tiff)",
+        )
+        if path:
+            self.map_tiff_requested.emit(path)
+
+    def _redraw_gradient(self) -> None:
+        if not _MPL_OK or self._gradient_canvas is None or not self._last_results:
+            return
+        accessors = {
+            "isa": lambda metrics: metrics.isa_index,
+            "shdi": lambda metrics: metrics.shannon_diversity,
+            "sidi": lambda metrics: metrics.simpson_diversity,
+            "lpi": lambda metrics: metrics.largest_patch_index,
+            "patches": lambda metrics: metrics.total_patches,
+        }
+        values = [
+            accessors[self.gradient_metric](result["landscape_metrics"])
+            for result in self._last_results
+        ]
+        labels = [result["point_label"] for result in self._last_results]
+        self._gradient_fig.clear()
+        axis = self._gradient_fig.add_subplot(111)
+        import numpy as np
+        x = np.arange(len(labels))
+        minimum, maximum = min(values), max(values)
+        span = maximum - minimum or 1.0
+        colors = [
+            (1 - (value - minimum) / span, 0.4, (value - minimum) / span)
+            for value in values
+        ]
+        axis.bar(x, values, color=colors, edgecolor="#222")
+        axis.plot(x, values, color="#222", marker="o", linewidth=1)
+        axis.set_xticks(x)
+        axis.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
+        axis.set_ylabel(self._cmb_grad_metric.currentText())
+        axis.grid(axis="y", alpha=0.25)
+        self._gradient_canvas.draw_idle()
 
     # ── Compare ────────────────────────────────────────────────────────
 
@@ -615,6 +728,7 @@ class ComparePanel(QGroupBox):
 
         self._table.resizeColumnsToContents()
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._redraw_gradient()
 
     # ── i18n refresh ───────────────────────────────────────────────────
 
@@ -628,6 +742,11 @@ class ComparePanel(QGroupBox):
         self._btn_compare.setText(t("compare.compare_btn"))
         self.chk_unified.setText(t("compare.unified_radius"))
         self.lbl_unified.setText(t("compare.unified_radius_value") + ":")
+        self._btn_open_map.setText(t("compare_extra.show_map_btn"))
+        self._btn_bulk_dl.setText(t("compare_extra.bulk_download_btn"))
+        self._btn_map_tiff.setText(t("compare_extra.map_tiff_btn"))
+        self._lbl_gradient.setText("<b>" + t("compare_extra.gradient_title") + "</b>")
+        self._lbl_grad_metric.setText(t("compare_extra.gradient_metric") + ":")
         for row in self._point_rows:
             row.refresh_texts()
         self._paste_page.refresh_texts()

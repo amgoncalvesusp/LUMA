@@ -26,7 +26,7 @@ powershell -ExecutionPolicy Bypass -File packaging\windows\build_installer.ps1
 
 Saida esperada:
 
-`packaging\windows\output\LUMA_Setup_1.2.0.exe`
+`packaging\windows\output\LUMA_Setup_1.2.1.exe`
 
 ## GitHub
 

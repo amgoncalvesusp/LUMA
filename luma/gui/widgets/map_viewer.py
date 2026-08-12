@@ -410,7 +410,7 @@ class MapViewer(QWidget):
         </div>
         """
 
-        html = f"""
+        document_html = f"""
         <!DOCTYPE html>
         <html>
         <head>
@@ -441,13 +441,63 @@ class MapViewer(QWidget):
         </body>
         </html>
         """
-        self._load_html(html)
+        self._load_html(document_html)
 
     def grab_map(self):
         """Return a QPixmap of the current map view (for TIFF / PDF export)."""
         if self._web is None:
             return None
         return self._web.grab()
+
+    def export_tiff_with_legend(
+        self,
+        path: str,
+        class_stats: list | None = None,
+        title: str = "",
+    ) -> bool:
+        """Save the current map as a TIFF with an optional legend strip."""
+        pixmap = self.grab_map()
+        if pixmap is None or pixmap.isNull():
+            return False
+        try:
+            from PySide6.QtCore import QBuffer, QIODevice
+            from PIL import Image, ImageDraw, ImageFont
+            from io import BytesIO
+
+            buffer = QBuffer()
+            buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+            pixmap.save(buffer, "PNG")
+            map_image = Image.open(BytesIO(bytes(buffer.data()))).convert("RGB")
+            rows = list(class_stats or [])[:16]
+            row_height = 22
+            legend_height = max(60, 40 + row_height * max(len(rows), 1))
+            output = Image.new(
+                "RGB", (map_image.width, map_image.height + legend_height), "white"
+            )
+            output.paste(map_image, (0, 0))
+            draw = ImageDraw.Draw(output)
+            try:
+                font = ImageFont.truetype("arial.ttf", 13)
+                bold_font = ImageFont.truetype("arialbd.ttf", 14)
+            except Exception:
+                font = ImageFont.load_default()
+                bold_font = font
+            y = map_image.height + 8
+            if title:
+                draw.text((12, y), title, fill="black", font=bold_font)
+                y += 22
+            for stats in rows:
+                color = getattr(stats, "color", "#888")
+                name = getattr(stats, "class_name", str(stats))
+                percentage = getattr(stats, "percentage", None)
+                draw.rectangle([12, y + 4, 28, y + 18], fill=color, outline="black")
+                label = name + (f"  ({percentage:.1f}%)" if percentage is not None else "")
+                draw.text((36, y + 2), label, fill="black", font=font)
+                y += row_height
+            output.save(path, format="TIFF")
+            return True
+        except Exception:
+            return pixmap.save(path, "TIFF")
 
     def _load_html(self, html: str) -> None:
         # Use setHtml with a base URL so the CDN scripts can load

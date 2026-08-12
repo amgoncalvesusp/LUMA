@@ -4,6 +4,20 @@ All notable changes to LUMA are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-08-11
+
+### Fixed
+- Kept the background temporal-analysis worker alive until its result callback,
+  restoring the result path in the responsive interface.
+- Restored temporal and comparison chart rendering after the v1.2 interface
+  reorganization.
+
+### Added
+- Export of comparison points and buffers as WGS-84 KML, KMZ and separate
+  point/buffer Shapefile layers with `.prj` files.
+- Export of the comparison map as a TIFF with a legend.
+- Selective export of the temporal-series or comparison chart as PNG, SVG or PDF.
+
 ## [1.2.0] - 2026-07-16
 
 ### Added

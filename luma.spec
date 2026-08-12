@@ -100,6 +100,9 @@ a = Analysis(
         "PIL", "folium", "folium.plugins",
         "reportlab", "reportlab.lib", "reportlab.platypus",
         "exactextract",
+        # geospatial and chart export backends
+        "shapefile", "matplotlib.backends.backend_qtagg",
+        "matplotlib.backends.backend_agg",
         # openpyxl for Excel import/export
         "openpyxl", "openpyxl.workbook", "openpyxl.worksheet",
         "openpyxl.styles", "openpyxl.reader", "openpyxl.writer",

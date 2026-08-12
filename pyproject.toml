@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "luma"
-version = "1.2.0"
+version = "1.2.1"
 description = "Land Use & Land Cover Analyzer — analyze raster datasets within coordinate-based buffer zones"
 readme = "README.md"
 license = "Apache-2.0"
@@ -36,6 +36,7 @@ dependencies = [
     "matplotlib>=3.8",
     "reportlab>=4.0",
     "openpyxl>=3.1",
+    "pyshp>=2.3",
 ]
 
 [project.optional-dependencies]

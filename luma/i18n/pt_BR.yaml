@@ -25,6 +25,12 @@ menu:
   export_compare_tiff: "Exportar Mapa Comparativo como TIFF"
   compare_tiff_no_data: "Execute a análise comparativa primeiro."
   compare_tiff_no_map: "Mapa não disponível. Aguarde a análise comparativa ser concluída."
+  export_geospatial: "Exportar Pontos e Buffers (KML/KMZ/SHP/TIF)"
+  export_chart: "Exportar gráfico..."
+  chart_no_data: "Execute uma análise temporal ou comparativa primeiro."
+  chart_choose: "Escolha o gráfico para exportar:"
+  chart_temporal: "Série temporal"
+  chart_compare: "Gradiente da comparação"
 
 input:
   latitude: "Latitude"
@@ -187,6 +193,16 @@ compare:
   metric_area_min: "Menor Fragmento (ha)"
   metric_area_mean: "Fragmento Médio (ha)"
 
+compare_extra:
+  show_map_btn: "Abrir mapa"
+  bulk_download_btn: "Exportar dados GIS"
+  map_tiff_btn: "Exportar mapa TIFF"
+  bulk_download_no_data: "Execute a comparação antes de exportar os dados GIS."
+  bulk_download_dir: "Escolha a pasta para os arquivos GIS"
+  bulk_download_done: "Arquivos GIS exportados para {path}"
+  gradient_title: "Gráfico comparativo"
+  gradient_metric: "Métrica"
+
 warnings:
   CRITICAL_FEW_PIXELS: "CRÍTICO: Apenas {n} pixels na área do buffer. Os resultados são estatisticamente não confiáveis. Use um raio maior ou dataset de maior resolução."
   LOW_PIXEL_COUNT: "AVISO: Apenas {n} pixels na área do buffer. Considere usar um raio maior ou dataset de maior resolução para resultados mais confiáveis."
@@ -233,6 +249,11 @@ aoi:
   invalid_vertices: "Um polígono precisa de pelo menos três vértices."
   selected_area: "Área selecionada: {area:,.2f} ha"
   import_dialog: "Importar área de interesse"
+
+ui:
+  chart_type: "Tipo de gráfico"
+  chart_bar: "Barras"
+  chart_line: "Linhas"
 
 report:
   title: "Relatório de Análise de Uso e Cobertura do Solo"

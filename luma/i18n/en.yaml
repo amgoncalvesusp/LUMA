@@ -25,6 +25,12 @@ menu:
   export_compare_tiff: "Export Compare Map as TIFF"
   compare_tiff_no_data: "Run the comparison analysis first."
   compare_tiff_no_map: "Map not ready. Wait for the compare analysis to complete."
+  export_geospatial: "Export Points and Buffers (KML/KMZ/SHP/TIF)"
+  export_chart: "Export chart..."
+  chart_no_data: "Run a temporal or comparison analysis first."
+  chart_choose: "Choose the chart to export:"
+  chart_temporal: "Temporal series"
+  chart_compare: "Comparison gradient"
 
 input:
   latitude: "Latitude"
@@ -64,6 +70,11 @@ aoi:
   invalid_vertices: "A polygon needs at least three vertices."
   selected_area: "Selected area: {area:,.2f} ha"
   import_dialog: "Import area of interest"
+
+ui:
+  chart_type: "Chart type"
+  chart_bar: "Bars"
+  chart_line: "Lines"
 
 tabs:
   single: "Analysis"
@@ -199,6 +210,16 @@ compare:
   metric_area_max: "Largest Patch (ha)"
   metric_area_min: "Smallest Patch (ha)"
   metric_area_mean: "Mean Patch (ha)"
+
+compare_extra:
+  show_map_btn: "Open map"
+  bulk_download_btn: "Export GIS data"
+  map_tiff_btn: "Export map TIFF"
+  bulk_download_no_data: "Run the comparison before exporting GIS data."
+  bulk_download_dir: "Choose a folder for the GIS files"
+  bulk_download_done: "GIS files exported to {path}"
+  gradient_title: "Comparison chart"
+  gradient_metric: "Metric"
 
 warnings:
   CRITICAL_FEW_PIXELS: "CRITICAL: Only {n} pixels in the buffer area. Results are statistically unreliable. Use a larger radius or higher-resolution dataset."

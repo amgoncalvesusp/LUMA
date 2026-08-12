@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton,
     QTabWidget, QStatusBar, QMenuBar, QMessageBox, QFileDialog,
     QSplitter, QLabel, QComboBox, QApplication, QProgressDialog, QScrollArea,
+    QInputDialog,
 )
 from PySide6.QtCore import Qt, QThread, Signal, QObject, QSize
 from PySide6.QtGui import QAction
@@ -44,6 +45,10 @@ from luma.core.stats import (
 from luma.core.buffer import buffer_geojson, buffer_area_km2
 from luma.core.project import build_project, load_project, save_project
 from luma.output.serialization import serializable_parameters
+from luma.output.charts import (
+    build_compare_gradient_figure, build_temporal_series_figure, save_figure,
+)
+from luma.output.geospatial import export_points_buffers
 from luma.sources.catalog import (
     load_legend_classes, get_source, load_legend, resolve_remote_url, validate_year,
 )
@@ -148,8 +153,10 @@ class MainWindow(QMainWindow):
         self._last_temporal_years: tuple[int, int] = (0, 0)
         self._last_temporal_series: list[dict] | None = None
         self._last_compare: list[dict] | None = None
+        self._last_compare_points: list[dict] | None = None
         self._aoi: AOI | None = None
         self._active_task_thread: QThread | None = None
+        self._active_task_worker: TaskWorker | None = None
         self._auto_compact = False
         self._setup_ui()
         self._setup_menu()
@@ -337,6 +344,9 @@ class MainWindow(QMainWindow):
         # -- Tab 3: Compare Points --
         self._compare_panel = ComparePanel()
         self._compare_panel.compare_requested.connect(self._run_comparison)
+        self._compare_panel.open_map_requested.connect(self._on_compare_open_map)
+        self._compare_panel.bulk_download_requested.connect(self._on_compare_bulk_download)
+        self._compare_panel.map_tiff_requested.connect(self._on_compare_map_tiff)
         compare_scroll = QScrollArea()
         compare_scroll.setWidgetResizable(True)
         compare_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
@@ -402,6 +412,14 @@ class MainWindow(QMainWindow):
         export_tiff = QAction(t("menu.export_compare_tiff"), self)
         export_tiff.triggered.connect(self._export_compare_tiff)
         file_menu.addAction(export_tiff)
+
+        export_geospatial = QAction(t("menu.export_geospatial"), self)
+        export_geospatial.triggered.connect(self._export_geospatial_bundle)
+        file_menu.addAction(export_geospatial)
+
+        export_chart = QAction(t("menu.export_chart"), self)
+        export_chart.triggered.connect(self._export_chart)
+        file_menu.addAction(export_chart)
 
         file_menu.addSeparator()
         exit_act = QAction(t("menu.exit"), self)
@@ -631,10 +649,16 @@ class MainWindow(QMainWindow):
         worker.finished.connect(thread.quit)
         worker.finished.connect(worker.deleteLater)
         thread.finished.connect(thread.deleteLater)
-        thread.finished.connect(lambda: setattr(self, "_active_task_thread", None))
+        thread.finished.connect(lambda: self._clear_background_task(thread))
         self._active_task_thread = thread
+        self._active_task_worker = worker
         thread.start()
         return True
+
+    def _clear_background_task(self, thread: QThread) -> None:
+        if self._active_task_thread is thread:
+            self._active_task_thread = None
+            self._active_task_worker = None
 
     @staticmethod
     def _compute_temporal_transition(
@@ -847,6 +871,7 @@ class MainWindow(QMainWindow):
         # Reuse the comparison export/map pipeline while retaining the exact
         # polygon area in each result record.
         self._last_compare = result
+        self._last_compare_points = None
         areas = self._aoi_compare_panel.areas
         exact_areas = [
             {"label": result[index]["point_label"], "aoi": area}
@@ -911,6 +936,7 @@ class MainWindow(QMainWindow):
             return
         results, map_points = result
         self._last_compare = results
+        self._last_compare_points = map_points
         self._compare_panel.update_results(results)
         self._compare_map_viewer.show_compare_points(map_points)
         self._status_bar.showMessage(t("status.done"))
@@ -1300,8 +1326,101 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self, "Error", f"PDF export failed:\n{exc}")
 
+    def _comparison_points(self):
+        return list(self._last_compare_points or [])
+
+    def _on_compare_open_map(self, points: list) -> None:
+        map_points = [
+            {"label": point.name, "lat": point.lat, "lon": point.lon, "radius_m": point.radius}
+            for point in points
+        ]
+        self._compare_map_viewer.show_compare_points(map_points)
+        self._tabs.setCurrentIndex(3)
+
+    def _on_compare_bulk_download(self, target_dir: str) -> None:
+        """Export WGS-84 vectors and the current comparison map."""
+        if not self._last_compare_points:
+            QMessageBox.warning(self, "", t("compare_extra.bulk_download_no_data"))
+            return
+        points = self._comparison_points()
+        if not points:
+            return
+        try:
+            output_dir = Path(target_dir)
+            outputs = export_points_buffers(output_dir, points)
+            map_path = output_dir / "compare_map.tif"
+            class_stats = self._last_compare[0].get("class_stats", [])
+            if not self._compare_map_viewer.export_tiff_with_legend(
+                str(map_path), class_stats=class_stats, title=t("tabs.compare_map")
+            ):
+                QMessageBox.warning(self, "Error", t("menu.compare_tiff_no_map"))
+            else:
+                outputs["map_tif"] = map_path
+            self._status_bar.showMessage(
+                t("compare_extra.bulk_download_done", path=str(output_dir))
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"{t('menu.export_geospatial')}:\n{exc}")
+
+    def _on_compare_map_tiff(self, path: str) -> None:
+        class_stats = self._last_compare[0].get("class_stats", []) if self._last_compare else []
+        if self._compare_map_viewer.export_tiff_with_legend(
+            path, class_stats=class_stats, title=t("tabs.compare_map")
+        ):
+            self._status_bar.showMessage(f"TIFF exported to {path}")
+        else:
+            QMessageBox.warning(self, "Error", t("menu.compare_tiff_no_map"))
+
+    def _export_geospatial_bundle(self) -> None:
+        if not self._last_compare_points:
+            QMessageBox.information(self, "", t("compare_extra.bulk_download_no_data"))
+            return
+        target_dir = QFileDialog.getExistingDirectory(
+            self, t("compare_extra.bulk_download_dir")
+        )
+        if target_dir:
+            self._on_compare_bulk_download(target_dir)
+
+    def _export_chart(self) -> None:
+        options: list[tuple[str, str]] = []
+        if self._last_temporal_series:
+            options.append((t("menu.chart_temporal"), "temporal"))
+        if self._last_compare:
+            options.append((t("menu.chart_compare"), "compare"))
+        if not options:
+            QMessageBox.information(self, "", t("menu.chart_no_data"))
+            return
+        labels = [label for label, _ in options]
+        selected, ok = QInputDialog.getItem(
+            self, t("menu.export_chart"), t("menu.chart_choose"), labels, 0, False
+        )
+        if not ok:
+            return
+        key = dict(options)[selected]
+        path, _ = QFileDialog.getSaveFileName(
+            self, t("menu.export_chart"), "luma_chart.png",
+            "PNG (*.png);;SVG (*.svg);;PDF (*.pdf)",
+        )
+        if not path:
+            return
+        try:
+            if key == "temporal":
+                figure = build_temporal_series_figure(
+                    self._last_temporal_series,
+                    getattr(self._temporal_panel, "chart_type", "bar"),
+                )
+            else:
+                figure = build_compare_gradient_figure(
+                    self._last_compare,
+                    getattr(self._compare_panel, "gradient_metric", "isa"),
+                )
+            save_figure(figure, path)
+            self._status_bar.showMessage(f"Chart exported to {path}")
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"{t('menu.export_chart')}:\n{exc}")
+
     def _export_compare_tiff(self) -> None:
-        """Save the compare map as a high-quality TIFF for publication."""
+        """Save the comparison map as a TIFF with its class legend."""
         if not self._last_compare:
             QMessageBox.information(self, "", t("menu.compare_tiff_no_data"))
             return
@@ -1309,16 +1428,8 @@ class MainWindow(QMainWindow):
             self, t("menu.export_compare_tiff"), "luma_compare_map.tif",
             "TIFF (*.tif *.tiff)",
         )
-        if not path:
-            return
-        pix = self._compare_map_viewer.grab_map()
-        if pix is None or pix.isNull():
-            QMessageBox.warning(self, "Error", t("menu.compare_tiff_no_map"))
-            return
-        if pix.save(path, "TIFF"):
-            self._status_bar.showMessage(f"TIFF exported to {path}")
-        else:
-            QMessageBox.critical(self, "Error", f"Failed to save TIFF: {path}")
+        if path:
+            self._on_compare_map_tiff(path)
 
     # ── Dialogs ───────────────────────────────────────────────────────────
 
