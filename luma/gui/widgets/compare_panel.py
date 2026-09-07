@@ -697,7 +697,7 @@ class ComparePanel(QGroupBox):
             ("compare.metric_patch_density", lambda m: f"{m.patch_density:.1f}"),
             ("compare.metric_lpi",           lambda m: f"{m.largest_patch_index:.1f}"),
             ("compare.metric_aggregation",   lambda m: f"{m.aggregation_index:.1f}"),
-            ("compare.metric_contagion",     lambda m: f"{m.contagion:.1f}"),
+            ("compare.metric_contagion",     lambda m: f"{m.contagion:.1f}" if m.contagion is not None else "—"),
             ("compare.metric_shape",         lambda m: f"{m.mean_shape_index:.3f}"),
             ("compare.metric_area_max",      lambda m: f"{m.largest_patch_area_m2 / 10_000:,.2f}"),
             ("compare.metric_area_min",      lambda m: f"{m.smallest_patch_area_m2 / 10_000:,.2f}"),

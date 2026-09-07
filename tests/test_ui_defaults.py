@@ -12,6 +12,22 @@ from luma.gui.widgets.aoi_widget import AOIWidget
 from luma.i18n.translator import set_language
 
 
+def test_undefined_contagion_displays_missing_in_metrics_panel():
+    from luma.core.stats import LandscapeMetrics
+    from luma.gui.widgets.results_table import MetricsPanel
+
+    app = QApplication.instance() or QApplication([])
+    panel = MetricsPanel()
+    try:
+        panel.update_metrics(LandscapeMetrics(contagion=None))
+        assert panel._labels["contagion"].text() == "—"
+        panel.update_metrics(LandscapeMetrics(contagion=25.0))
+        assert panel._labels["contagion"].text() == "25.00%"
+    finally:
+        panel.close()
+        app.processEvents()
+
+
 def test_main_window_starts_in_brazilian_portuguese():
     app = QApplication.instance() or QApplication([])
     window = MainWindow()

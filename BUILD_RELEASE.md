@@ -31,3 +31,19 @@ Saida esperada:
 ## GitHub
 
 Nao versionar `dist/`, `build/`, `.venv/`, logs, zips ou instaladores gerados. O repositorio deve conter o codigo fonte, `luma.spec`, `packaging/windows`, documentacao e testes.
+
+## Validacao da correcao CONTAG (2026-09-07, ainda sem release)
+
+- Base: tag `v1.2.1`, commit `8ce58e0`. Nenhum instalador novo foi gerado.
+- TDD: nove regressões falharam antes da correção; testes cobrem cálculo manual
+  FRAGSTATS, rotação, reflexão, classes numéricas arbitrárias, máscara de fundo,
+  valores indefinidos e apresentação GUI/PDF.
+- Windows/Python 3.13: 57 testes aprovados no ambiente original e em ambiente
+  isolado atualizado. Cobertura com branches: 47% global e 81% em `core/stats.py`.
+  A cobertura global permanece abaixo de 80%; este patch não constitui auditoria
+  completa da interface.
+- Ambiente isolado: Pillow 12.3.0, click 8.5.0, idna 3.19, urllib3 2.7.0,
+  pip 26.2.1 e setuptools 84.0.0; `pip-audit` sem vulnerabilidades conhecidas e
+  dependências compatíveis. O mínimo declarado do Pillow passou a 12.3.0.
+- O ambiente original foi preservado e ainda precisa das atualizações de
+  dependências identificadas na auditoria antes de um próximo empacotamento.

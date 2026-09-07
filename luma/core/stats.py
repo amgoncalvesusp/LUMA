@@ -36,7 +36,7 @@ class LandscapeMetrics:
     edge_density: float = 0.0
     effective_mesh_size: float = 0.0
     aggregation_index: float = 0.0   # AI (%), McGarigal & Marks 1995
-    contagion: float = 0.0           # CONTAG (%), O'Neill et al. 1988
+    contagion: float | None = None  # CONTAG (%); undefined without class adjacency
     mean_shape_index: float = 0.0    # SHAPE_MN, McGarigal & Marks 1995
     largest_patch_area_m2: float = 0.0   # AREA_MX — largest single patch (m²)
     smallest_patch_area_m2: float = 0.0  # AREA_MN — smallest single patch (m²)
@@ -279,7 +279,7 @@ def compute_landscape_metrics(
         edge_density=round(edge_density, 2),
         effective_mesh_size=round(mesh_size, 2),
         aggregation_index=round(aggregation, 2),
-        contagion=round(contagion, 2),
+        contagion=round(contagion, 2) if contagion is not None else None,
         mean_shape_index=round(mean_shape, 4),
         largest_patch_area_m2=round(largest_patch_area, 2),
         smallest_patch_area_m2=round(smallest_patch_area, 2),
@@ -380,63 +380,41 @@ def _compute_contagion(
     data: np.ndarray,
     valid_mask: np.ndarray,
     n_classes: int,
-) -> float:
+) -> float | None:
     """Contagion Index (CONTAG, %) — O'Neill et al. (1988), Li & Reynolds (1993).
 
-    CONTAG = 100 × (1 + Σ_{i,j} P_ij · ln(P_ij) / (2·ln(n)))
-
-    where P_ij is the probability of a randomly chosen adjacent pair being of
-    classes i and j. Includes both same-class and different-class adjacencies.
+    FRAGSTATS: P_ij = p_i * g_ij / sum_j(g_ij), with class area proportions
+    p_i and double-counted orthogonal adjacencies g_ij. Background and external
+    boundaries are excluded. Return None where the index is undefined.
+    https://fragstats.org/index.php/fragstats-metrics/patch-based-metrics/aggregation-metrics/l1-contagion-index
     """
     if n_classes <= 1:
-        return 100.0  # Single class = maximum contagion
-
-    # Build adjacency count dict: {(i, j): count} using 4-neighbor
-    classes_present = np.unique(data[valid_mask])
+        return None
+    classes_present, pixel_counts = np.unique(data[valid_mask], return_counts=True)
     if classes_present.size <= 1:
-        return 100.0
+        return None
+    valid_h = valid_mask[:, :-1] & valid_mask[:, 1:]
+    valid_v = valid_mask[:-1, :] & valid_mask[1:, :]
+    pairs_a = np.concatenate([data[:, :-1][valid_h], data[:-1, :][valid_v]])
+    pairs_b = np.concatenate([data[:, 1:][valid_h], data[1:, :][valid_v]])
+    if pairs_a.size == 0:
+        return None
 
-    # Count adjacencies as unordered pairs (i, j) with i<=j
-    adj: dict[tuple[int, int], int] = {}
-
-    # Horizontal pairs
-    left = data[:, :-1]
-    right = data[:, 1:]
-    vm_l = valid_mask[:, :-1]
-    vm_r = valid_mask[:, 1:]
-    valid_h = vm_l & vm_r
-    h_left = left[valid_h]
-    h_right = right[valid_h]
-    # Vertical pairs
-    top = data[:-1, :]
-    bottom = data[1:, :]
-    vm_t = valid_mask[:-1, :]
-    vm_b = valid_mask[1:, :]
-    valid_v = vm_t & vm_b
-    v_top = top[valid_v]
-    v_bottom = bottom[valid_v]
-
-    pairs_a = np.concatenate([h_left, v_top])
-    pairs_b = np.concatenate([h_right, v_bottom])
-    total_adj = pairs_a.size
-    if total_adj == 0:
-        return 0.0
-
-    # Use np.unique to count unique pairs (ordered, then normalize)
-    keys = pairs_a.astype(np.int64) * 10_000 + pairs_b.astype(np.int64)
-    uniq, counts = np.unique(keys, return_counts=True)
-
-    # Compute P_ij as fraction of all adjacencies
-    contag_sum = 0.0
-    for k, c in zip(uniq, counts):
-        p_ij = c / total_adj
-        if p_ij > 0:
-            contag_sum += p_ij * math.log(p_ij)
-
-    max_entropy = 2.0 * math.log(n_classes)
-    if max_entropy == 0:
-        return 0.0
-    contag = 1.0 + (contag_sum / max_entropy)
+    # Dense indices avoid collisions between arbitrary numeric class IDs.
+    a = np.searchsorted(classes_present, pairs_a)
+    b = np.searchsorted(classes_present, pairs_b)
+    adjacency = np.zeros((classes_present.size, classes_present.size), dtype=np.int64)
+    np.add.at(adjacency, (a, b), 1)
+    np.add.at(adjacency, (b, a), 1)
+    row_totals = adjacency.sum(axis=1, keepdims=True)
+    conditional = np.divide(
+        adjacency, row_totals, out=np.zeros_like(adjacency, dtype=float),
+        where=row_totals != 0,
+    )
+    probabilities = (pixel_counts / pixel_counts.sum())[:, None] * conditional
+    positive = probabilities[probabilities > 0]
+    contag_sum = float(np.sum(positive * np.log(positive)))
+    contag = 1.0 + contag_sum / (2.0 * math.log(classes_present.size))
     return 100.0 * max(0.0, min(1.0, contag))
 
 

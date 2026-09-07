@@ -221,7 +221,9 @@ class MetricsPanel(QGroupBox):
         self._labels["edge_density"].setText(f"{m.edge_density:.2f}")
         self._labels["mesh_size"].setText(f"{m.effective_mesh_size:,.2f}")
         self._labels["aggregation_index"].setText(f"{m.aggregation_index:.2f}%")
-        self._labels["contagion"].setText(f"{m.contagion:.2f}%")
+        self._labels["contagion"].setText(
+            f"{m.contagion:.2f}%" if m.contagion is not None else "—"
+        )
         self._labels["mean_shape_index"].setText(f"{m.mean_shape_index:.4f}")
         # Convert m² -> ha for display
         self._labels["largest_patch_area"].setText(f"{m.largest_patch_area_m2 / 10_000:,.2f}")

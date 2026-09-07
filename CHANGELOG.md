@@ -4,6 +4,18 @@ All notable changes to LUMA are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+- Corrected CONTAG to use class area proportions and double-counted orthogonal
+  cell adjacencies according to the [FRAGSTATS definition](https://fragstats.org/index.php/fragstats-metrics/patch-based-metrics/aggregation-metrics/l1-contagion-index).
+  Rotations and reflections now preserve the metric. Background and external
+  boundary edges remain excluded.
+- Represent undefined CONTAG as missing (`null` in JSON, blank in Excel and
+  an em dash in the interface/PDF), including single-class landscapes and maps
+  without valid adjacencies. Updated the Portuguese and English metric help.
+- Raised the supported Pillow minimum to 12.3.0 to exclude known vulnerabilities.
+
 ## [1.2.1] - 2026-08-11
 
 ### Fixed

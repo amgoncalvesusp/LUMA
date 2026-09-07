@@ -3,6 +3,21 @@ from luma.output.report import generate_pdf_report
 import numpy as np
 
 
+def test_pdf_comparison_accepts_undefined_contagion(tmp_path):
+    data = np.ones((2, 2), dtype=np.uint8)
+    mask = np.ones_like(data, dtype=bool)
+    stats = compute_class_statistics(data, mask, 100.0, {1: {"name": "Floresta"}})
+    metrics = compute_landscape_metrics(stats, data, mask, 100.0)
+    assert metrics.contagion is None
+    path = tmp_path / "undefined-contagion.pdf"
+    generate_pdf_report(
+        str(path), None, {}, lang="pt_BR",
+        compare_data=[{"point_label": "Área 1", "geometry_area_m2": 400.0,
+                       "class_stats": stats, "landscape_metrics": metrics}],
+    )
+    assert path.stat().st_size > 1000
+
+
 def test_pdf_report_contains_polygon_comparison_data(tmp_path):
     data = np.array([[1, 1], [2, 2]], dtype=np.uint8)
     mask = np.ones_like(data, dtype=bool)
